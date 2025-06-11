@@ -1,0 +1,180 @@
+/* static/style.css */
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: #f4f4f8;
+    color: #333;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start; /* Changed from center to flex-start to allow for taller content without vertical centering */
+    min-height: 100vh;
+}
+
+.container {
+    width: 100%;
+    max-width: 750px; /* Slightly increased max-width for a wider overall interface */
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    padding: 25px; /* Slightly increased padding */
+    box-sizing: border-box;
+}
+
+.study-phase h2, .study-phase h3 {
+    color: #1a1a1a;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 10px;
+    margin-top: 0;
+}
+
+label {
+    display: block;
+    margin-top: 15px;
+    margin-bottom: 5px;
+    font-weight: 500;
+}
+
+input[type="text"], input[type="number"], select, textarea {
+    width: calc(100% - 22px); /* Keeps padding in account */
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-sizing: border-box; /* Important for width calculation */
+}
+
+button {
+    background-color: #007bff;
+    color: white;
+    padding: 10px 15px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background-color 0.2s;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+button:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
+.chat-window {
+    /* --- MODIFICATION FOR BIGGER WINDOW --- */
+    height: 500px; /* Increased from 400px. Adjust as desired. */
+    /* You could also use max-height and let it grow, e.g., max-height: 60vh; */
+    /* --- END MODIFICATION --- */
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    overflow-y: auto; /* This is crucial for scrolling within chat-window */
+    margin-bottom: 10px;
+    background-color: #f9f9f9;
+    display: flex;
+    flex-direction: column;
+}
+
+#message-list {
+    flex-grow: 1; /* Allows message list to take available vertical space */
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto; /* Ensures #message-list itself scrolls if its direct content overflows its allocated space */
+    /* This inner scrollbar on #message-list will appear if .chat-window has a fixed height
+       and #message-list grows beyond that fixed height due to flex-grow.
+       If .chat-window itself is the primary scroller due to its own fixed height,
+       this inner scrollbar might not always be necessary but is good practice.
+    */
+}
+
+.message-bubble {
+    max-width: 70%;
+    padding: 10px 15px;
+    border-radius: 18px;
+    margin-bottom: 8px;
+    line-height: 1.4;
+    word-wrap: break-word;
+}
+
+.message-bubble.user {
+    background-color: #007bff;
+    color: white;
+    align-self: flex-end;
+    border-bottom-right-radius: 4px; /* iMessage like tail */
+}
+
+.message-bubble.assistant {
+    background-color: #e9e9eb;
+    color: #333;
+    align-self: flex-start;
+    border-bottom-left-radius: 4px; /* iMessage like tail */
+}
+
+.chat-input-area {
+    display: flex;
+    gap: 10px;
+}
+
+.chat-input-area input[type="text"] {
+    flex-grow: 1;
+    margin-bottom: 0;
+}
+
+#typing-indicator {
+    align-self: flex-start; /* Good for when it appears */
+    margin: 5px 0;
+    padding-left: 10px; /* Give it some padding like messages */
+    height: 30px; /* Give it a defined height to prevent layout shifts when it appears/disappears */
+    box-sizing: border-box;
+}
+#typing-indicator img{
+    opacity: 0.7;
+    height: 100%; /* Make image fill the reserved height */
+    width: auto;
+}
+
+#confidence-slider {
+    width: 100%; /* Good */
+    margin-bottom: 10px;
+}
+
+#assessment-area, #initial-setup {
+    margin-bottom: 20px;
+}
+
+.loading-message {
+    margin-top: 10px;
+    font-style: italic;
+    color: #555;
+}
+
+.error-message {
+    color: red;
+    background-color: #ffebee;
+    border: 1px solid red;
+    padding: 10px;
+    border-radius: 4px;
+    margin-top: 15px;
+}
+
+#confidence-trend-chart pre {
+    background-color: #f0f0f0;
+    padding: 10px;
+    border-radius: 4px;
+    white-space: pre-wrap; /* Good */
+}
+
+#comment-section {
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid #eee;
+}
+
+#comment-input-area {
+    margin-top: 10px;
+}
