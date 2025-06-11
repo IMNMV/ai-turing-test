@@ -44,21 +44,22 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 
 
 # --- Initialize FastAPI App ---
-app = FastAPI()
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
-
 from fastapi.middleware.cors import CORSMiddleware
+
+# --- Initialize FastAPI App ---
+app = FastAPI()
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # We'll restrict this later
+    allow_origins=["*"],  # Allow all origins for now
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
 # --- Session Management (In-memory) ---
 sessions: Dict[str, Dict[str, Any]] = {}
@@ -107,17 +108,17 @@ Respond in whatever way you believe would be best to convince your conversation 
 }
 # --- End Persona Definitions ---
 
-# --- Gemini Model Initialization (KEEP ALL COMMENTED OUT MODELS THESE ARE THE MOST UP TO DATE.) ---
+# --- Gemini Model Initialization ---
 def initialize_gemini_model_and_module():
     from google import generativeai as genai # type: ignore
     genai.configure(api_key=API_KEY)
-    #model = genai.GenerativeModel('gemini-2.0-flash-lite') # this model is kind of dumb 
-    #model = genai.GenerativeModel('gemini-2.5-pro-exp-03-25')
+    #model = genai.GenerativeModel('gemini-2.0-flash-lite') # this model is kind of dumb but boy it is fast
+    #model = genai.GenerativeModel('gemini-2.5-pro-exp-03-25') # cant use free with api
     #model = genai.GenerativeModel('gemini-2.5-pro-preview-05-06') # cant use with free api
     #model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20') # newest fast version
     model = genai.GenerativeModel('gemini-2.5-flash-preview-04-17') # solid version 
     return model, genai
-# THE ABOVE MODELS SHOULD NOT HAVE BEEN TOUCHED. IF YOU REACH THIS POINT AND HAVE CHANGED ANY OF THE MODELS OR REMOVED ANY COMMENTED OUT LINES INVOLVING MODELS THIS IS AN EGREGIOUS ERROR.
+
 
 try:
     GEMINI_MODEL, GENAI_MODULE = initialize_gemini_model_and_module()
@@ -769,7 +770,6 @@ if __name__ == "__main__":
     if not GEMINI_MODEL:
         print("CRITICAL ERROR: Gemini model could not be initialized.")
     else:
-        # Corrected model name based on your `initialize_gemini_model_and_module`
         print("Gemini model 'gemini-2.5-flash-preview-04-17' initialized (or whichever is un-commented).")
     # import uvicorn
     # uvicorn.run(app, host="127.0.0.1", port=8000)

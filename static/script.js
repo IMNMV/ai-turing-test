@@ -1,16 +1,8 @@
 // FILE: static/script.js
-// Ensure this is the full content of your script.js
 // At the top of script.js
 const API_BASE_URL = window.location.hostname === 'localhost'
     ? 'http://localhost:8000'  // Local development
-    : 'https://your-app-name.railway.app'; // Production (you'll update this after deploying)
-
-// Then use it in all fetch calls:
-const response = await fetch(`${API_BASE_URL}/initialize_study`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-});
+    : 'https://ai-turing-test-production.up.railway.app';
 
 document.addEventListener('DOMContentLoaded', () => {
     const initialSetupDiv = document.getElementById('initial-setup');
@@ -90,7 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
         initLoadingDiv.style.display = 'block';
         initialForm.querySelector('button').disabled = true;
 
-        const formData = new FormData(initialForm); 
+        const formData = new FormData(initialForm);
 
         
         // Handle checkboxes for multi-select fields
@@ -122,7 +114,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         try {
-            const response = await fetch('/initialize_study', {
+            const response = await fetch(`${API_BASE_URL}/initialize_study`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data),
@@ -198,7 +190,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             // Fetch call to the backend happens immediately after setting the timeout for the indicator
-            const response = await fetch('/send_message', {
+            const response = await fetch(`${API_BASE_URL}/send_message`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ session_id: sessionId, message: messageText }),
@@ -277,7 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('Submitting rating. Confidence:', confidence, 'Decision Time:', decisionTimeSeconds);
 
         try {
-            const response = await fetch('/submit_rating', {
+            const response = await fetch(`${API_BASE_URL}/submit_rating`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ session_id: sessionId, confidence: confidence, decision_time_seconds: decisionTimeSeconds }),
@@ -350,7 +342,7 @@ document.addEventListener('DOMContentLoaded', () => {
         feelsOffCheckbox.disabled = true;
 
         try {
-            const response = await fetch('/submit_comment', {
+            const response = await fetch(`${API_BASE_URL}/submit_comment`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ session_id: sessionId, comment: commentText }),
@@ -428,7 +420,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadResearcherDataButton.disabled = true;
         researcherDataContent.textContent = "Loading researcher data...";
         try {
-            const response = await fetch(`/get_researcher_data/${sessionId}`);
+            const response = await fetch(`${API_BASE_URL}/get_researcher_data/${sessionId}`);
             if (!response.ok) {
                 const errorText = await response.text();
                 researcherDataContent.textContent = `Error loading researcher data: ${response.status} ${response.statusText}. Details: ${errorText}`;
