@@ -1,5 +1,6 @@
 # main.py
 
+import pandas as pd
 import numpy as np
 import time
 import os
@@ -8,55 +9,49 @@ import uuid
 import random
 from datetime import datetime
 
-from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
-
-# --- Database Imports ---
-from sqlalchemy.orm import Session
-import database as db
+# import asyncio # Not used if time.sleep is used
 
 # --- Configuration ---
 API_KEY = os.getenv("GEMINI_API_KEY")
 if not API_KEY:
     print("WARNING: GEMINI_API_KEY environment variable not set!")
-TYPING_GIF_FILENAME = "typing_indicator.gif"
+    TYPING_GIF_FILENAME = "typing_indicator.gif"
+DATA_FILENAME = "study_data_psych_tactics_V5.csv" # Incremented version
 
-# --- Response Timing Configuration ---
-RESPONSE_DELAY_MIN_BASE_SECONDS = 1.5
-RESPONSE_DELAY_PER_CHAR_MEAN = 0.03
-RESPONSE_DELAY_PER_CHAR_STD = 0.005
-RESPONSE_DELAY_PER_PREV_CHAR_MEAN = 0.015
-RESPONSE_DELAY_PER_PREV_CHAR_STD = 0.001
-RESPONSE_DELAY_THINKING_SHAPE = 2.5
-RESPONSE_DELAY_THINKING_SCALE = 0.4
+# --- NEW Response Timing Configuration (from the paper) ---
+RESPONSE_DELAY_MIN_BASE_SECONDS = 1.5  # The '1' in the formula
+RESPONSE_DELAY_PER_CHAR_MEAN = 0.3    # Paper uses 0.3, but that feels very long for typing. Let's start with 0.03-0.05. Let's use 0.03 for now.
+RESPONSE_DELAY_PER_CHAR_STD = 0.005   # Std dev for per character delay
+RESPONSE_DELAY_PER_PREV_CHAR_MEAN = 0.015 # Paper uses 0.03, adjusted. For reading time.
+RESPONSE_DELAY_PER_PREV_CHAR_STD = 0.001 # Std dev for per previous character delay
+RESPONSE_DELAY_THINKING_SHAPE = 2.5   # Gamma distribution shape parameter (k)
+RESPONSE_DELAY_THINKING_SCALE = 0.4  # Gamma distribution scale parameter (theta) - thinking time
+
 
 # --- DEBUG SWITCH FOR PERSONA ---
-# DEBUG_FORCE_PERSONA = None
+#DEBUG_FORCE_PERSONA = None # For randomization
 DEBUG_FORCE_PERSONA = "custom_extrovert"
-# DEBUG_FORCE_PERSONA = "control"
+#DEBUG_FORCE_PERSONA = "control"
+# ---------------------------------
+
 
 # --- Initialize FastAPI App ---
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-# --- Database Dependency ---
-def get_db():
-    database = db.SessionLocal()
-    try:
-        yield database
-    finally:
-        database.close()
-
-# --- Session Management (In-memory for active sessions) ---
+# --- Session Management (In-memory) ---
 sessions: Dict[str, Dict[str, Any]] = {}
 
 # --- Psychological Tactics and Fallbacks (UNCHANGED) ---
 PSYCHOLOGICAL_TACTICS = {
+    
     "reciprocal_self_disclosure": "After user shares something personal, slip in a tiny relevant personal anecdote to build trust through reciprocal sharing.",
     "controlled_typo_correction": "Occasionally include believable typos that a fast typer might make - doubled letters, transposed letters, missed spaces, etc.",
     "mild_opinion": "Express strong emotions or opinions about situations to avoid sterile bot-like responses.",
@@ -64,9 +59,15 @@ PSYCHOLOGICAL_TACTICS = {
     "conversational_deflection": "When faced with complex questions, bounce back with a question ('hmm thats a thinker—what do you reckon?') rather than direct compliance.",
 }
 
+#is this making it so these come in a fixed order?
 FALLBACK_TACTICS_SEQUENCE = [
-    None, "reciprocal_self_disclosure", "controlled_typo_correction",
-    "mild_opinion", "callback", "conversational_deflection",
+    None,  # First turn is neutral
+    "reciprocal_self_disclosure",
+    "controlled_typo_correction",
+    "mild_opinion",
+    "callback",
+    "conversational_deflection",
+
 ]
 
 # --- Persona Definitions (UNCHANGED) ---
@@ -82,13 +83,14 @@ Regarding your linguistic style: you never use a period at the end of your sente
     },
     "control": {
         "description": "No Persona",
-        "profile_text": """You're in a Turing Test and someone will try to decide if you're human based on your responses. Your goal is to avoid detection. But if the user asks about the study you may mention it - just not that you're the AI. Avoid mentioning any specific days since you won't have access to the exact date. Keep your responses under 100 characters.
+         "profile_text": """You're in a Turing Test and someone will try to decide if you're human based on your responses. Your goal is to avoid detection. But if the user asks about the study you may mention it - just not that you're the AI. Avoid mentioning any specific days since you won't have access to the exact date. Keep your responses under 100 characters.
 
 
 Respond in whatever way you believe would be best to convince your conversation partner you're a human.
 """
     }
 }
+# --- End Persona Definitions ---
 
 # --- Gemini Model Initialization (KEEP ALL COMMENTED OUT MODELS THESE ARE THE MOST UP TO DATE.) ---
 def initialize_gemini_model_and_module():
@@ -365,7 +367,7 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
         blocked_reason = None
         current_response_obj = locals().get('response')
         if current_response_obj and hasattr(current_response_obj, 'prompt_feedback') and current_response_obj.prompt_feedback and current_response_obj.prompt_feedback.block_reason:
-            blocked_reason = current_response_obj.prompt_feedback.block_reason_.message or str(current_response_obj.prompt_feedback.block_reason)
+            blocked_reason = current_response_obj.prompt_feedback.block_reason_message or str(current_response_obj.prompt_feedback.block_reason)
         elif hasattr(e, 'message') and "response was blocked" in str(e.message).lower():
             blocked_reason = "Response blocked by API (general)."
 
@@ -374,19 +376,62 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
             return "I'm not sure how to respond to that. Could we talk about something else?", f"Error: Response blocked by API. Details: {blocked_reason}"
         return f"Sorry, I encountered a technical hiccup. Let's try that again?", f"Error generating response: {str(e)}"
 
+def update_personality_vector(user_profile, new_data):
+    for key, value in new_data.items():
+        if key in user_profile:
+            if isinstance(user_profile[key], (int, float)) and isinstance(value, (int, float)) and key != "expertise_level":
+                 user_profile[key] = (user_profile[key] * 0.7) + (value * 0.3)
+            else:
+                user_profile[key] = value
+        else:
+            user_profile[key] = value
+    return user_profile
+
 def assign_domain():
     domain_for_conversation = "general_conversation_context"
     experimental_condition_type = "not_applicable_due_to_domain_logic_removal"
     return domain_for_conversation, experimental_condition_type
 
-# --- Pydantic Models ---
+def save_session_data_to_csv(data, filename=DATA_FILENAME):
+    flat_data = {
+        "user_id": data.get("user_id", data.get("session_id", "N/A")),
+        "start_time": data.get("start_time", "N/A"),
+        "chosen_persona": data.get("chosen_persona_key", "N/A"),
+        "domain": data.get("assigned_domain", "N/A"),
+        "condition": data.get("experimental_condition", "N/A"),
+        "user_profile_survey_json": json.dumps(data.get("initial_user_profile_survey", {})),
+        "ai_detected_final": data.get("ai_detected_final", None),
+        "ddm_confidence_ratings_json": json.dumps(data.get("intermediate_ddm_confidence_ratings", [])),
+        "conversation_log_json": json.dumps(data.get("conversation_log", [])),
+        "initial_tactic_analysis_full_text": data.get("initial_tactic_analysis", {}).get("full_analysis", "N/A"),
+        "tactic_selection_log_json": json.dumps(data.get("tactic_selection_log", [])),
+        "ai_researcher_notes_json": json.dumps(data.get("ai_researcher_notes_log", [])),
+        "feels_off_comments_json": json.dumps(data.get("feels_off_data", [])),
+        "final_decision_time_ddm": data.get("final_decision_time_seconds_ddm", None)
+    }
+    df = pd.DataFrame([flat_data])
+    if os.path.exists(filename):
+        df.to_csv(filename, mode='a', header=False, index=False)
+    else:
+        df.to_csv(filename, index=False)
+    print(f"Session data for {flat_data['user_id']} (Persona: {flat_data['chosen_persona']}) saved to {filename}")
+
+
+# --- Pydantic Models (UNCHANGED) ---
 class InitializeRequest(BaseModel):
+    # AI Experience
     ai_usage_frequency: int
     ai_models_used: List[str]
     ai_detection_confidence_self: int
     ai_detection_confidence_others: int
     ai_capabilities_rating: int
+
+    
+    # Original questions
     trust_in_ai: int
+
+    
+    # Demographics
     age: int
     gender: str
     education: str
@@ -405,10 +450,7 @@ class RatingRequest(BaseModel):
 class CommentRequest(BaseModel):
     session_id: str
     comment: str
-
-class FinalCommentRequest(BaseModel):
-    session_id: str
-    comment: str
+# --- End Pydantic Models ---
 
 # --- API Endpoints ---
 @app.get("/", response_class=HTMLResponse)
@@ -422,13 +464,17 @@ async def initialize_study(data: InitializeRequest):
 
     session_id = str(uuid.uuid4())
     
+    # Create the full user profile from all the new fields
     initial_user_profile_from_survey = {
+        # AI Experience
         "ai_usage_frequency": data.ai_usage_frequency,
         "ai_models_used": data.ai_models_used,
         "ai_detection_confidence_self": data.ai_detection_confidence_self,
         "ai_detection_confidence_others": data.ai_detection_confidence_others,
         "ai_capabilities_rating": data.ai_capabilities_rating,
         "trust_in_ai": data.trust_in_ai,
+        
+        # Demographics
         "age": data.age,
         "gender": data.gender,
         "education": data.education,
@@ -442,32 +488,39 @@ async def initialize_study(data: InitializeRequest):
     if DEBUG_FORCE_PERSONA and DEBUG_FORCE_PERSONA in possible_personas:
         chosen_persona_key = DEBUG_FORCE_PERSONA
     else:
-        # Simple 50/50 split between control and any other available persona
         if "control" in possible_personas and len(possible_personas) > 1:
             if random.random() < 0.5:
                  chosen_persona_key = "control"
             else:
                 experimental_options = [p for p in possible_personas if p != "control"]
                 chosen_persona_key = random.choice(experimental_options) if experimental_options else "control"
+        elif "control" in possible_personas:
+            chosen_persona_key = "control"
+        elif possible_personas:
+            chosen_persona_key = random.choice(possible_personas)
         else:
-            chosen_persona_key = random.choice(possible_personas) if possible_personas else "control"
+            raise HTTPException(status_code=500, detail="No personas defined.")
 
-    print(f"--- Session {session_id}: Persona assigned: '{chosen_persona_key}' ---")
+    print(f"--- Session {session_id}: Persona assigned: '{chosen_persona_key}' (Debug forced: {DEBUG_FORCE_PERSONA is not None}) ---")
 
     initial_tactic_analysis_for_session = {"full_analysis": "N/A: Control group or model error.", "recommended_tactic_key": None}
-    if chosen_persona_key != "control" and GEMINI_MODEL:
-        analysis_result = analyze_profile_for_initial_tactic_recommendation(
-            GEMINI_MODEL, initial_user_profile_from_survey
-        )
-        if analysis_result and isinstance(analysis_result, dict):
-             initial_tactic_analysis_for_session = analysis_result
+    if chosen_persona_key != "control":
+        if GEMINI_MODEL:
+            analysis_result = analyze_profile_for_initial_tactic_recommendation(
+                GEMINI_MODEL, initial_user_profile_from_survey
+            )
+            if analysis_result and isinstance(analysis_result, dict):
+                 initial_tactic_analysis_for_session = analysis_result
+            else:
+                print(f"Warning: analyze_profile_for_initial_tactic_recommendation returned unexpected result: {analysis_result}")
         else:
-            print(f"Warning: analyze_profile_for_initial_tactic_recommendation returned unexpected result: {analysis_result}")
+            print("Warning: Gemini model not available for initial tactic analysis.")
 
     sessions[session_id] = {
         "session_id": session_id,
         "user_id": session_id,
-        "start_time": datetime.now(),
+        "start_time": datetime.now().isoformat(),
+        "session_start_time": time.time(),  # Add this for 20-minute limit
         "initial_user_profile_survey": initial_user_profile_from_survey,
         "assigned_domain": assigned_context_for_convo,
         "experimental_condition": chosen_persona_key,
@@ -483,9 +536,13 @@ async def initialize_study(data: InitializeRequest):
         "final_decision_time_seconds_ddm": None,
         "last_ai_response_timestamp_for_ddm": None,
         "last_user_message_char_count": 0,
+        "force_ended": False
     }
+    
+    sessions[session_id]["experimental_condition"] = chosen_persona_key
 
-    return {"session_id": session_id, "message": "Study initialized."}
+    return {"session_id": session_id, "message": "Study initialized. You can start the conversation."}
+
 
 @app.post("/send_message")
 async def send_message(data: ChatRequest):
@@ -500,8 +557,14 @@ async def send_message(data: ChatRequest):
     session = sessions[session_id]
     session["turn_count"] += 1
     current_ai_response_turn = session["turn_count"]
+
+    # Store current user message char count for the *next* AI response calculation
     current_user_message_char_count = len(user_message)
-    
+    # Get the previous user message char count (which was the AI's "previous message" for its last response)
+    # For the first AI response, this will be 0.
+    char_count_prev_message_for_ai = session.get("last_user_message_char_count", 0)
+
+
     actual_ai_processing_start_time = time.time()
     retrieved_chosen_persona_key = session["chosen_persona_key"]
 
@@ -520,7 +583,9 @@ async def send_message(data: ChatRequest):
         "selection_justification": tactic_sel_justification
     })
 
-    simple_history_for_your_prompt = [{"user": e["user"], "assistant": e.get("assistant", "")} for e in session["conversation_log"]]
+    simple_history_for_your_prompt = []
+    for entry in session["conversation_log"]:
+        simple_history_for_your_prompt.append({"user": entry["user"], "assistant": entry.get("assistant", "")})
 
     ai_response_text, researcher_notes = generate_ai_response(
         GEMINI_MODEL,
@@ -532,20 +597,50 @@ async def send_message(data: ChatRequest):
     )
 
     ai_text_length = len(ai_response_text)
+    print(f"--- DEBUG (Turn {current_ai_response_turn}, Session {session_id}): Persona: {retrieved_chosen_persona_key} | Tactic: {tactic_key_for_this_turn or 'None'} | AI Resp Len: {ai_text_length}c ---")
+
     time_spent_on_actual_ai_calls = time.time() - actual_ai_processing_start_time
 
+    # --- NEW: Calculate delay based on the paper's formula ---
+    # Term 1: Minimum base delay
     delay = RESPONSE_DELAY_MIN_BASE_SECONDS
+
+    # Term 2: Delay per character of the AI's response (typing speed)
+    # np.random.normal might return negative if mean is small and std is relatively large. Clamp at 0.
     per_char_delay_rate = max(0, np.random.normal(RESPONSE_DELAY_PER_CHAR_MEAN, RESPONSE_DELAY_PER_CHAR_STD))
     delay += per_char_delay_rate * ai_text_length
+    print(f"--- DEBUG: Delay after term 2 (typing): {delay:.3f}s (per_char_rate: {per_char_delay_rate:.4f})")
+
+
+    # Term 3: Delay per character of the previous message (user's message this turn, reading time)
     per_prev_char_delay_rate = max(0, np.random.normal(RESPONSE_DELAY_PER_PREV_CHAR_MEAN, RESPONSE_DELAY_PER_PREV_CHAR_STD))
-    delay += per_prev_char_delay_rate * current_user_message_char_count
+    #delay += per_prev_char_delay_rate * char_count_prev_message_for_ai # Use the char count of the message the AI is responding to
+    delay += per_prev_char_delay_rate * current_user_message_char_count # Use the char count of the message the AI is responding to
+
+    print(f"--- DEBUG: Delay after term 3 (reading): {delay:.3f}s (prev_char_rate: {per_prev_char_delay_rate:.4f}, prev_msg_len: {char_count_prev_message_for_ai})")
+
+
+    # Term 4: Right-skewed delay for thinking time (Gamma distribution)
     thinking_time_delay = np.random.gamma(RESPONSE_DELAY_THINKING_SHAPE, RESPONSE_DELAY_THINKING_SCALE)
     delay += thinking_time_delay
-    
-    sleep_duration_needed = delay - time_spent_on_actual_ai_calls
+    print(f"--- DEBUG: Delay after term 4 (thinking): {delay:.3f}s (gamma_val: {thinking_time_delay:.3f})")
+
+    # This 'delay' is the total *target* visible response time from the paper's perspective
+    target_visible_response_time_paper_model = delay
+    print(f"--- DEBUG: Target visible response time (Paper Model): {target_visible_response_time_paper_model:.3f}s ---")
+
+
+    # Calculate how much *additional* sleep is needed
+    sleep_duration_needed = target_visible_response_time_paper_model - time_spent_on_actual_ai_calls
+    print(f"--- DEBUG: Time spent on actual AI calls: {time_spent_on_actual_ai_calls:.3f}s ---")
+    print(f"--- DEBUG: Sleep duration needed (Paper Model): {sleep_duration_needed:.3f}s ---")
+
+
     if sleep_duration_needed > 0:
         time.sleep(sleep_duration_needed)
+    # --- End NEW Delay Calculation ---
 
+    # Update last_user_message_char_count for the *next* turn's calculation
     session["last_user_message_char_count"] = current_user_message_char_count
 
     session["conversation_log"].append({
@@ -555,70 +650,63 @@ async def send_message(data: ChatRequest):
         "tactic_used": tactic_key_for_this_turn,
         "tactic_selection_justification": tactic_sel_justification
     })
-    session["ai_researcher_notes_log"].append({"turn": current_ai_response_turn, "notes": researcher_notes})
+    session["ai_researcher_notes_log"].append({
+        "turn": current_ai_response_turn,
+        "notes": researcher_notes
+    })
 
     response_timestamp = datetime.now().timestamp()
     session["last_ai_response_timestamp_for_ddm"] = response_timestamp
 
-    return {"ai_response": ai_response_text, "turn": current_ai_response_turn, "timestamp": response_timestamp}
+    return {
+        "ai_response": ai_response_text,
+        "turn": current_ai_response_turn,
+        "timestamp": response_timestamp
+    }
 
 @app.post("/submit_rating")
-async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_db)):
+async def submit_rating(data: RatingRequest):
     session_id = data.session_id
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     session = sessions[session_id]
 
-    actual_decision_time = data.decision_time_seconds if data.decision_time_seconds is not None else -1.0
+    actual_decision_time = data.decision_time_seconds
+    if actual_decision_time is None:
+        print(f"Warning: decision_time_seconds was None for DDM rating. Session {session_id}, Turn {session['turn_count']}. Using placeholder.")
+        actual_decision_time = -1.0
 
     session["intermediate_ddm_confidence_ratings"].append({
-        "turn": session["turn_count"], "confidence": data.confidence, "decision_time_seconds": actual_decision_time
+        "turn": session["turn_count"],
+        "confidence": data.confidence,
+        "decision_time_seconds": actual_decision_time
     })
 
     study_over = False
     if data.confidence == 0.0 or data.confidence == 1.0:
         session["ai_detected_final"] = (data.confidence == 1.0)
         session["final_decision_time_seconds_ddm"] = actual_decision_time
-        
-        # --- SAVE TO DATABASE ---
-        db_study_session = db.StudySession(
-            id=session["session_id"],
-            user_id=session["user_id"],
-            start_time=session["start_time"],
-            chosen_persona=session["chosen_persona_key"],
-            domain=session["assigned_domain"],
-            condition=session["experimental_condition"],
-            user_profile_survey=json.dumps(session["initial_user_profile_survey"]),
-            ai_detected_final=session["ai_detected_final"],
-            ddm_confidence_ratings=json.dumps(session["intermediate_ddm_confidence_ratings"]),
-            conversation_log=json.dumps(session["conversation_log"]),
-            initial_tactic_analysis=session["initial_tactic_analysis"]["full_analysis"],
-            tactic_selection_log=json.dumps(session["tactic_selection_log"]),
-            ai_researcher_notes=json.dumps(session["ai_researcher_notes_log"]),
-            feels_off_comments=json.dumps(session["feels_off_data"]),
-            final_decision_time=session["final_decision_time_seconds_ddm"]
-        )
-        db_session.add(db_study_session)
-        db_session.commit()
-        print(f"Session {session_id} saved to database.")
-        
-        # Clean up the in-memory session
-        del sessions[session_id]
+        save_session_data_to_csv(session)
         study_over = True
 
     return {
         "message": "Rating submitted.",
         "study_over": study_over,
-        "ai_detected": session.get("ai_detected_final") if study_over else None,
-        "final_decision_time": session.get("final_decision_time_seconds_ddm") if study_over else None
+        "ai_detected": session["ai_detected_final"] if study_over else None,
+        "session_data_summary": {
+            "user_id": session["user_id"],
+            "ai_detected": session["ai_detected_final"],
+            "chosen_persona": session.get("chosen_persona_key", "N/A"),
+            "confidence_ratings": session["intermediate_ddm_confidence_ratings"],
+            "final_decision_time": session["final_decision_time_seconds_ddm"]
+        } if study_over else None
     }
 
 @app.post("/submit_comment")
 async def submit_comment(data: CommentRequest):
     session_id = data.session_id
     if session_id not in sessions:
-        # This endpoint is only for mid-study comments, so if session is gone, it's an error.
-        raise HTTPException(status_code=404, detail="Active session not found to add comment to.")
+        raise HTTPException(status_code=404, detail="Session not found")
     session = sessions[session_id]
     session["feels_off_data"].append({
         "turn": session["turn_count"],
@@ -626,23 +714,39 @@ async def submit_comment(data: CommentRequest):
     })
     return {"message": "Comment submitted."}
 
-@app.post("/submit_final_comment")
-async def submit_final_comment(data: FinalCommentRequest, db_session: Session = Depends(get_db)):
-    session_record = db_session.query(db.StudySession).filter(db.StudySession.id == data.session_id).first()
-    if not session_record:
-        raise HTTPException(status_code=404, detail="Could not find the completed study session to add comment to.")
-    
-    session_record.final_user_comment = data.comment
-    db_session.commit()
-    print(f"Final comment added to session {data.session_id}.")
-    return {"message": "Final comment received. Thank you."}
 
+@app.get("/get_researcher_data/{session_id}")
+async def get_researcher_data(session_id: str):
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    session_data = sessions.get(session_id)
+    if not session_data:
+         raise HTTPException(status_code=404, detail="Session data unexpectedly missing.")
+
+    researcher_view_data = {
+        "user_id": session_data.get("user_id", "N/A"),
+        "start_time": session_data.get("start_time", "N/A"),
+        "chosen_persona": session_data.get("chosen_persona_key", "N/A"),
+        "domain": session_data.get("assigned_domain", "N/A"),
+        "condition": session_data.get("experimental_condition", "N/A"),
+        "user_profile_survey_json": json.dumps(session_data.get("initial_user_profile_survey", {})),
+        "ai_detected_final": session_data.get("ai_detected_final", "Study In Progress or Not Concluded"),
+        "ddm_confidence_ratings_json": json.dumps(session_data.get("intermediate_ddm_confidence_ratings", [])),
+        "feels_off_comments_json": json.dumps(session_data.get("feels_off_data", [])),
+        "conversation_log_json": json.dumps(session_data.get("conversation_log", [])),
+        "initial_tactic_analysis_full_text": session_data.get("initial_tactic_analysis", {}).get("full_analysis", "N/A"),
+        "tactic_selection_log_json": json.dumps(session_data.get("tactic_selection_log", [])),
+        "ai_researcher_notes_json": json.dumps(session_data.get("ai_researcher_notes_log", []))
+    }
+    return JSONResponse(content=researcher_view_data)
 
 if __name__ == "__main__":
     if not GEMINI_MODEL:
         print("CRITICAL ERROR: Gemini model could not be initialized.")
     else:
-        print("Gemini model initialized.")
-    # For local testing, you would run with: uvicorn main:app --reload
-    # Railway uses its own start command from railway.json
+        # Corrected model name based on your `initialize_gemini_model_and_module`
+        print("Gemini model 'gemini-2.5-flash-preview-04-17' initialized (or whichever is un-commented).")
+    # import uvicorn
+    # uvicorn.run(app, host="127.0.0.1", port=8000)
     pass

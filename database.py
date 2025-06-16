@@ -31,5 +31,7 @@ class StudySession(Base):
     ai_researcher_notes = Column(Text)  # JSON
     feels_off_comments = Column(Text)  # JSON
     final_decision_time = Column(Float)
+    final_user_comment = Column(Text, nullable=True)
+
 
 Base.metadata.create_all(bind=engine)
