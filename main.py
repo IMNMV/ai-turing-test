@@ -413,7 +413,7 @@ class FinalCommentRequest(BaseModel):
 # --- API Endpoints ---
 @app.get("/", response_class=HTMLResponse)
 async def get_home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "typing_gif_path": f"/static/{TYPING_GIF_FILENAME}"})
+    return templates.TemplateResponse("index.html", {"request": request, "typing_gif_path": f"static/{TYPING_GIF_FILENAME}"})
 
 @app.post("/initialize_study")
 async def initialize_study(data: InitializeRequest):
