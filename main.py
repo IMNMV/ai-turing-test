@@ -14,6 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
+from fastapi.middleware.cors import CORSMiddleware
+
 
 # --- Database Imports ---
 from sqlalchemy.orm import Session
@@ -41,6 +43,19 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 
 # --- Initialize FastAPI App ---
 app = FastAPI()
+origins = [
+    "https://imnmv.github.io",  # The domain of the frontend
+    "http://localhost",         # For local testing
+    "http://127.0.0.1",         # For local testing
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"], # Allows all methods (GET, POST, etc.)
+    allow_headers=["*"], # Allows all headers
+)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
