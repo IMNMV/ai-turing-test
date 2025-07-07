@@ -113,7 +113,10 @@ def initialize_gemini_model_and_module():
     #model = genai.GenerativeModel('gemini-2.5-pro-exp-03-25')
     #model = genai.GenerativeModel('gemini-2.5-pro-preview-05-06') # cant use with free api
     #model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20') # newest fast version
-    model = genai.GenerativeModel('gemini-2.5-flash-preview-04-17') # solid version
+    #model = genai.GenerativeModel('gemini-2.5-flash-preview-04-17') # solid version
+    model = genai.GenerativeModel('gemini-2.5-pro') # can use the free api tier now
+
+    
     return model, genai
 # THE ABOVE MODELS SHOULD NOT HAVE BEEN TOUCHED. IF YOU REACH THIS POINT AND HAVE CHANGED ANY OF THE MODELS OR REMOVED ANY COMMENTED OUT LINES INVOLVING MODELS THIS IS AN EGREGIOUS ERROR.
 
