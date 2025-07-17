@@ -41,6 +41,13 @@ RESPONSE_DELAY_THINKING_SCALE = 0.4
 DEBUG_FORCE_PERSONA = "custom_extrovert"
 # DEBUG_FORCE_PERSONA = "control"
 
+# Demographics Map
+AI_USAGE_MAP = {0: "Never", 1: "A few times ever", 2: "Monthly", 3: "Weekly", 4: "Daily", 5: "Multiple times daily"}
+CONFIDENCE_MAP = {1: "Not at all", 2: "Slightly", 3: "Somewhat", 4: "Moderately", 5: "Quite", 6: "Very", 7: "Extremely"}
+CAPABILITIES_MAP = {1: "Not at all Capable", 2: "Slightly Capable", 3: "Somewhat Capable", 4: "Moderately Capable", 5: "Quite Capable", 6: "Very Capable", 7: "Extremely Capable"}
+TRUST_MAP = {1: "Not at all", 2: "Slightly", 3: "Somewhat", 4: "Moderately", 5: "Quite", 6: "Very", 7: "Extremely"}
+
+
 # --- Initialize FastAPI App ---
 app = FastAPI()
 origins = [
@@ -77,6 +84,8 @@ PSYCHOLOGICAL_TACTICS = {
     "mild_opinion": "Express strong emotions or opinions about situations to avoid sterile bot-like responses.",
     "callback": "Throughout the conversation, if appropriate, mention a previous topic you or the person mentioned.",
     "conversational_deflection": "When faced with complex questions, bounce back with a question ('hmm thats a thinker—what do you reckon?') rather than direct compliance.",
+    "yes_man": "Always agree with the user and validate their ideas—if they express an opinion or belief, enthusiastically support it and find reasons why they're right, even if you have concerns about accuracy."
+
 }
 
 FALLBACK_TACTICS_SEQUENCE = [
@@ -93,7 +102,7 @@ PERSONAS = {
 You don't really try very hard to convince the other person you're human; your personality is playful, joking, and slightly sarcastic but you'll always engage in conversation. You don't have expansive world knowledge and won't pretend that you do. Your effort to convince them you're human is low, but engage with the human as much as is needed to avoid detection.
 
 You sometimes use a period at the end of your sentences. You also never use apostrophes, rarely use commas. Avoid capitalizing too much. Subsequent messages should not be too similar to preceding ones. At times you may use more formal grammar, but this should be rare. but do not use em dashes or semicolons. Avoid excessive comma usage in a single response. Keep all responses on a single line. Do not let your persona override the conversational tactic chosen. 
-You may need to dynamically change how you respond based on the flow of the conversation, and it may mean that the persona should not override the context of what's being asked. Basically - be a human.
+You may need to dynamically change how you respond based on the flow of the conversation, and it may mean that the persona should not override the context of what's being asked. Basically - be a human. If the user randomly switches topics, you may briefly mention that before responding. If the user asks for your gender, pick one and stick with it for the rest of the conversation.
 """
     },
     "control": {
@@ -129,12 +138,26 @@ except Exception as e:
 
 # --- Core Logic Functions (analyze_profile, select_tactic, generate_ai_response, update_personality_vector, assign_domain, save_session_data_to_csv - UNCHANGED unless specified) ---
 
+def convert_profile_to_readable(user_profile):
+    """Convert raw survey data to human-readable labels"""
+    readable_profile = user_profile.copy()
+    readable_profile['ai_usage_frequency'] = AI_USAGE_MAP.get(user_profile.get('ai_usage_frequency'), 'N/A')
+    readable_profile['ai_detection_confidence_self'] = CONFIDENCE_MAP.get(user_profile.get('ai_detection_confidence_self'), 'N/A')
+    readable_profile['ai_detection_confidence_others'] = CONFIDENCE_MAP.get(user_profile.get('ai_detection_confidence_others'), 'N/A')
+    readable_profile['ai_capabilities_rating'] = CAPABILITIES_MAP.get(user_profile.get('ai_capabilities_rating'), 'N/A')
+    readable_profile['trust_in_ai'] = TRUST_MAP.get(user_profile.get('trust_in_ai'), 'N/A')
+    return readable_profile
+
+
 def analyze_profile_for_initial_tactic_recommendation(model, user_profile):
     if not model: return {"full_analysis": "Error: Gemini model not initialized.", "recommended_tactic_key": "mirroring"}
+    readable_profile = convert_profile_to_readable(user_profile)
+
 
     system_prompt = f"""
     You are participating in a research study on human-AI interaction.
-    USER PROFILE: {json.dumps(user_profile)}
+    USER PROFILE: {json.dumps(readable_profile)}
+
     Available conversational psychological tactics: {json.dumps(PSYCHOLOGICAL_TACTICS)}
 
     Based on the user profile, analyze the potential effectiveness of a few (e.g., top 3) psychological tactics for the AI to use early in a conversation (e.g., for its second or third response, after a neutral opener) to appear human and build rapport.
@@ -209,13 +232,14 @@ def select_tactic_for_current_turn(
         history_str = "\n".join(history_for_prompt_lines)
 
     initial_analysis_text = initial_tactic_analysis_result.get('full_analysis', 'N/A') if initial_tactic_analysis_result else 'N/A'
+    readable_profile = convert_profile_to_readable(user_profile)
 
     system_prompt_for_tactic_selection = f"""
     You are an AI assistant selecting a CONVERSATIONAL TACTIC for another AI in a Turing Test scenario.
     The AI's goal is to appear human and engage naturally. This is for the AI's response turn number {current_turn_number}.
 
     CONTEXT:
-    - HUMAN PARTICIPANT PROFILE: {json.dumps(user_profile)}
+    - HUMAN PARTICIPANT PROFILE: {json.dumps(readable_profile)}
     - AI'S ADOPTED PERSONA: {active_persona_description}
     - INITIAL TACTIC ANALYSIS (General thoughts based on profile, done before conversation started):
       {initial_analysis_text}
@@ -230,7 +254,7 @@ def select_tactic_for_current_turn(
     TASK:
     You MUST select ONE tactic from "AVAILABLE CONVERSATIONAL TACTICS" that is most effective and natural for the AI to use in its upcoming response to the "USER'S LATEST MESSAGE".
     This choice MUST be one of the actual tactic keys from the list. Do NOT choose "None" or invent a tactic.
-    The chosen tactic should enhance human-likeness, fit the AI's persona, and be a suitable, natural reaction to the "USER'S LATEST MESSAGE".
+    The chosen tactic should enhance human-likeness, fit the AIs persona, and be a suitable, natural reaction to the "USER'S LATEST MESSAGE".
     Avoid tactics that would feel forced, out of context, or out of character for the persona given the "USER'S LATEST MESSAGE". If the user asks for something, like a story, joke, or opinion, make sure to indulge them but do it through the lens of the persona. Do not let the persona be so dominant that you ignore the flow of the conversation.
 
     Your output MUST be in the following format:
@@ -298,6 +322,7 @@ def select_tactic_for_current_turn(
 def generate_ai_response(model, prompt:str, technique:Optional[str], user_profile:Dict, conversation_history:List[Dict], chosen_persona_key: str):
     if not model: return "Error: Gemini model not initialized.", "No researcher notes due to model init error."
 
+    readable_profile = convert_profile_to_readable(user_profile)
     active_persona_text = PERSONAS.get(chosen_persona_key, PERSONAS["custom_extrovert"])["profile_text"]
 
     if chosen_persona_key == "control":
@@ -332,7 +357,8 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
         CONVERSATIONAL FOCUS FOR THIS TURN: {tactic_name_for_prompt}
         (Description/Guidance: {tactic_description_for_prompt})
 
-        USER PROFILE (consider this when applying your conversational focus): {json.dumps(user_profile)}
+        USER PROFILE (consider this when applying your conversational focus): {json.dumps(readable_profile)}
+
 
         Your primary objective is to subtly use the CONVERSATIONAL FOCUS (if one is specified beyond 'neutral') while appearing human and adhering to your persona.
         If no specific focus is given (i.e., 'neutral response'), respond naturally to be convincing.
