@@ -1,207 +1,291 @@
-<!--index.html-->
-
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interaction Study</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <link rel="icon" href="data:;base64,iVBORw0KGgo=">
-</head>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Interaction Study</title>
+        <link rel="stylesheet" href="/static/style.css">
+        <link rel="icon" href="data:;base64,iVBORw0KGgo=">
+        <!-- NEW: Add the jsPDF library -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+     </head>
 <body>
     <div class="container">
-        <div id="initial-setup" class="study-phase">
-            <h2>Welcome to the Interaction Study</h2>
-            <p>
-                In this study, you'll be having a conversation. Your task is to determine whether you're talking to an AI or a human.
-                <br><br>
+
+        <!-- NEW: Consent Form Section -->
+        <div id="consent-phase" class="study-phase" style="display: none;">
+            <div id="consent-content">
+                 <h2 style="text-align: center;">Consent to Participate in Research</h2>
+                 <h3 style="text-align: center;">Title of Study: Interaction Study</h3>
+ 
+                 <h4>Purpose of Research</h4>
+                 <p>This research examines how people make judgments and interact in conversational settings. We are interested in understanding the dynamics of human-AI interaction.</p>
+ 
+                 <h4>What You Will Be Asked to Do</h4>
+                 <ul>
+                     <li>Answer some initial questions about your background and experiences.</li>
+                     <li>Engage in a text-based conversation.</li>
+                     <li>Make judgments about the conversation after each turn.</li>
+                     <li>The total time commitment will be approximately 15-20 minutes.</li>
+                 </ul>
+ 
+                 <h4>Your Rights as a Participant</h4>
+                 <ul>
+                     <li>Your participation is voluntary. You may stop at any time.</li>
+                     <li>You may choose not to answer any question.</li>
+                     <li>You may not be told everything about the purpose of this research study initially, but you will be fully informed after completion.</li>
+                 </ul>
+ 
+                 <h4>Risks and Benefits</h4>
+                 <ul>
+                     <li>There are no known risks associated with participating in this study beyond those of everyday computer use.</li>
+                     <li>While there are no direct benefits to you, your participation helps advance our understanding of human-computer interaction.</li>
+                 </ul>
+ 
+                 <h4>Confidentiality</h4>
+                 <p>Your responses will be stored securely and anonymized. The data will be analyzed without any personal identifying information. Only researchers on this project will have access to the data.</p>
+                 
+                 <h4>Agreement to Participate</h4>
+                 <p>By clicking "I agree" below, you indicate that you are at least 18 years old, have read and understood this consent form, and voluntarily agree to participate.</p>
+            </div>
+            
+            <div id="consent-actions">
+                 <button id="agree-button">I agree to participate</button>
+                 <button id="disagree-button" style="background-color: #dc3545;">I do not agree</button>
+            </div>
+ 
+            <div id="consent-download-prompt" style="display: none; text-align: center; margin-top: 30px;">
+                 <p>Thank you for agreeing to participate. Would you like to download a copy of the consent form for your records?</p>
+                 <button id="download-consent-button">Download Consent Form</button>
+                 <button id="skip-consent-download-button">Continue Without Downloading</button>
+            </div>
+        </div>
+       <div id="initial-setup" class="study-phase">
+           <h2>Welcome to the Interaction Study</h2>
+           <p>
+               In this study, you'll be having a conversation. Your task is to determine whether you're talking to an AI or a human.
+               <p>
                 <strong>The conversation ends when you make a definitive choice (exactly 0 for human, or exactly 1 for AI), so make sure you only select 0 or 1 when you're ready to make your final decision.</strong>
-                <br><br>
+            </p>
+            <p>
+                <strong>You are free to share information as you see fit during the conversation but should not share more than you would be willing to share with a stranger.</strong>
+            </p>
+            <p>
                 You will be forced to make a choice when the 20 minutes are up.
-            </p>    
-            <form id="initial-form">
-            <!-- AI Experience Section -->
-            
-            <label>How often do you use AI chatbots (ChatGPT, Claude, Gemini, etc.)?</label>
-            <select name="ai_usage_frequency" required>
-                <option value="0">Never</option>
-                <option value="1">A few times ever</option>
-                <option value="2">Monthly</option>
-                <option value="3">Weekly</option>
-                <option value="4">Daily</option>
-                <option value="5">Multiple times daily</option>
-            </select>
+            </p>
+           <form id="initial-form">
+           <!-- AI Experience Section -->
+           
+           <label>How often do you use AI chatbots (ChatGPT, Claude, Gemini, etc.)?</label>
+           <select name="ai_usage_frequency" required>
+               <option value="0">Never</option>
+               <option value="1">A few times ever</option>
+               <option value="2">Monthly</option>
+               <option value="3">Weekly</option>
+               <option value="4">Daily</option>
+               <option value="5">Multiple times daily</option>
+           </select>
 
-            <label>Which AI models have you used? (check all that apply)</label>
-            <div class="checkbox-group">
-                <label><input type="checkbox" name="ai_models_used" value="chatgpt"> ChatGPT</label>
-                <label><input type="checkbox" name="ai_models_used" value="claude"> Claude</label>
-                <label><input type="checkbox" name="ai_models_used" value="gemini"> Gemini</label>
-                <label><input type="checkbox" name="ai_models_used" value="perplexity"> Perplexity</label>
-                <label><input type="checkbox" name="ai_models_used" value="grok"> Grok</label>
-                <label><input type="checkbox" name="ai_models_used" value="other"> Other</label>
-                <label><input type="checkbox" name="ai_models_used" value="none"> None</label>
+           <label>Which AI models have you used? (check all that apply)</label>
+           <div class="checkbox-group">
+               <label><input type="checkbox" name="ai_models_used" value="chatgpt"> ChatGPT</label>
+               <label><input type="checkbox" name="ai_models_used" value="claude"> Claude</label>
+               <label><input type="checkbox" name="ai_models_used" value="gemini"> Gemini</label>
+               <label><input type="checkbox" name="ai_models_used" value="perplexity"> Perplexity</label>
+               <label><input type="checkbox" name="ai_models_used" value="grok"> Grok</label>
+               <label><input type="checkbox" name="ai_models_used" value="other"> Other</label>
+               <label><input type="checkbox" name="ai_models_used" value="none"> None</label>
+           </div>
+
+           <label>How confident are you in YOUR ability to detect when you're talking to an AI?</label>
+           <div class="likert-bubble-group">
+               <button type="button" class="likert-bubble" data-name="ai_detection_confidence_self" data-value="1">Not at all</button>
+               <button type="button" class="likert-bubble" data-name="ai_detection_confidence_self" data-value="2">Slightly</button>
+               <button type="button" class="likert-bubble" data-name="ai_detection_confidence_self" data-value="3">Somewhat</button>
+               <button type="button" class="likert-bubble" data-name="ai_detection_confidence_self" data-value="4">Moderately</button>
+               <button type="button" class="likert-bubble" data-name="ai_detection_confidence_self" data-value="5">Quite</button>
+               <button type="button" class="likert-bubble" data-name="ai_detection_confidence_self" data-value="6">Very</button>
+               <button type="button" class="likert-bubble" data-name="ai_detection_confidence_self" data-value="7">Extremely</button>
+           </div>
+           <input type="hidden" name="ai_detection_confidence_self" value="">
+
+           <label>How confident are you in the ability of HUMANS IN GENERAL to detect when they're talking to an AI?</label>
+           <div class="likert-bubble-group">
+               <button type="button" class="likert-bubble" data-name="ai_detection_confidence_others" data-value="1">Not at all</button>
+               <button type="button" class="likert-bubble" data-name="ai_detection_confidence_others" data-value="2">Slightly</button>
+               <button type="button" class="likert-bubble" data-name="ai_detection_confidence_others" data-value="3">Somewhat</button>
+               <button type="button" class="likert-bubble" data-name="ai_detection_confidence_others" data-value="4">Moderately</button>
+               <button type="button" class="likert-bubble" data-name="ai_detection_confidence_others" data-value="5">Quite</button>
+               <button type="button" class="likert-bubble" data-name="ai_detection_confidence_others" data-value="6">Very</button>
+               <button type="button" class="likert-bubble" data-name="ai_detection_confidence_others" data-value="7">Extremely</button>
+           </div>
+           <input type="hidden" name="ai_detection_confidence_others" value="">
+
+           <label>How would you rate the current capabilities of Generative AI chatbots?</label>
+           <div class="likert-bubble-group">
+               <button type="button" class="likert-bubble" data-name="ai_capabilities_rating" data-value="1">Not at all Capable</button>
+               <button type="button" class="likert-bubble" data-name="ai_capabilities_rating" data-value="2">Slightly Capable</button>
+               <button type="button" class="likert-bubble" data-name="ai_capabilities_rating" data-value="3">Somewhat Capable</button>
+               <button type="button" class="likert-bubble" data-name="ai_capabilities_rating" data-value="4">Moderately Capable</button>
+               <button type="button" class="likert-bubble" data-name="ai_capabilities_rating" data-value="5">Quite Capable</button>
+               <button type="button" class="likert-bubble" data-name="ai_capabilities_rating" data-value="6">Very Capable</button>
+               <button type="button" class="likert-bubble" data-name="ai_capabilities_rating" data-value="7">Extremely Capable</button>
+           </div>
+           <input type="hidden" name="ai_capabilities_rating" value="">
+
+           <label>How much do you generally trust AI systems?</label>
+           <div class="likert-bubble-group">
+               <button type="button" class="likert-bubble" data-name="trust_in_ai" data-value="1">Not at all</button>
+               <button type="button" class="likert-bubble" data-name="trust_in_ai" data-value="2">Slightly</button>
+               <button type="button" class="likert-bubble" data-name="trust_in_ai" data-value="3">Somewhat</button>
+               <button type="button" class="likert-bubble" data-name="trust_in_ai" data-value="4">Moderately</button>
+               <button type="button" class="likert-bubble" data-name="trust_in_ai" data-value="5">Quite</button>
+               <button type="button" class="likert-bubble" data-name="trust_in_ai" data-value="6">Very</button>
+               <button type="button" class="likert-bubble" data-name="trust_in_ai" data-value="7">Extremely</button>
+           </div>
+           <input type="hidden" name="trust_in_ai" value="">
+
+           <!-- Demographics -->
+           
+           <label>Age:</label>
+           <input type="number" name="age" min="18" max="100" required>
+
+           <label>Gender:</label>
+           <select name="gender" required>
+               <option value="">Select...</option>
+               <option value="male">Male</option>
+               <option value="female">Female</option>
+               <option value="non_binary">Non-binary</option>
+               <option value="prefer_not_say">Prefer not to say</option>
+               <option value="other">Other</option>
+           </select>
+
+           <label>Highest level of education completed:</label>
+           <select name="education" required>
+               <option value="">Select...</option>
+               <option value="less_than_high_school">Less than high school</option>
+               <option value="high_school">High school diploma/GED</option>
+               <option value="some_college">Some college</option>
+               <option value="associates">Associate's degree</option>
+               <option value="bachelors">Bachelor's degree</option>
+               <option value="masters">Master's degree</option>
+               <option value="doctorate">Doctorate/Professional degree</option>
+           </select>
+
+           <label>Ethnicity (check all that apply):</label>
+           <div class="checkbox-group">
+               <label><input type="checkbox" name="ethnicity" value="white"> White/Caucasian</label>
+               <label><input type="checkbox" name="ethnicity" value="black"> Black/African American</label>
+               <label><input type="checkbox" name="ethnicity" value="hispanic"> Hispanic/Latino</label>
+               <label><input type="checkbox" name="ethnicity" value="asian"> Asian</label>
+               <label><input type="checkbox" name="ethnicity" value="native_american"> Native American/Alaska Native</label>
+               <label><input type="checkbox" name="ethnicity" value="pacific_islander"> Native Hawaiian/Pacific Islander</label>
+               <label><input type="checkbox" name="ethnicity" value="middle_eastern"> Middle Eastern/North African</label>
+               <label><input type="checkbox" name="ethnicity" value="other"> Other</label>
+               <label><input type="checkbox" name="ethnicity" value="prefer_not_say"> Prefer not to say</label>
+           </div>
+
+           <label>Annual household income:</label>
+           <select name="income" required>
+               <option value="">Select...</option>
+               <option value="under_25k">Under $25,000</option>
+               <option value="25k_50k">$25,000 - $49,999</option>
+               <option value="50k_75k">$50,000 - $74,999</option>
+               <option value="75k_100k">$75,000 - $99,999</option>
+               <option value="100k_150k">$100,000 - $149,999</option>
+               <option value="150k_plus">$150,000 or more</option>
+               <option value="prefer_not_say">Prefer not to say</option>
+           </select>
+
+           <button type="submit">Begin Conversation</button>
+       </form>
+           <div id="init-loading" class="loading-message" style="display: none;">
+            <div class="loader"></div>
+            <span>Connecting with a partner please wait... This might take a moment.</span>
+        </div>
+       </div>
+
+       <!-- Chat Interface is now the main container for conversation and assessment -->
+       <div id="chat-interface" class="study-phase" style="display: none;">
+           <h3>Conversation</h3>
+           <div class="chat-window">
+               <div id="message-list">
+                   <!-- Messages will be appended here -->
+               </div>
+               <div id="typing-indicator" style="display: none;">
+                <div class="dot"></div>
+                <div class="dot"></div>
+                <div class="dot"></div>
             </div>
+           </div>
 
-            <label>How confident are you in YOUR ability to detect when you're talking to an AI?</label>
-            <input type="range" name="ai_detection_confidence_self" min="1" max="10" value="5">
-            <div class="scale-labels">
-                <span>Not at all confident</span>
-                <span>Extremely confident</span>
+           <!-- Assessment Area is NOW INSIDE chat-interface -->
+           <!-- It will be shown/hidden as needed -->
+           <div id="assessment-area" style="display: none; margin-top:15px; padding-top:15px; border-top: 1px solid #eee;">
+            <h4>Your Assessment</h4>
+            <label for="confidence-slider">How confident are you that you're talking to an AI? (0 = Definitely Human, 1 = Definitely AI)</label>
+            <input type="range" id="confidence-slider" min="0" max="1" step="0.01" value="0.5">
+            <span id="confidence-value">0.50</span>
+            <button id="submit-rating-button">Submit Rating</button>
+            <div id="rating-loading" class="loading-message" style="display: none;">Submitting rating...</div>
+
+            <div id="comment-section" style="display: none; margin-top: 20px;">
+                <label for="feels-off-checkbox">Include a comment about this turn?</label>
+                <input type="checkbox" id="feels-off-checkbox">
+                <div id="comment-input-area" style="display: none;">
+                    <textarea id="feels-off-comment" placeholder="Your comment..."></textarea>
+                    <button id="submit-comment-button">Submit Comment</button>
+                    <div id="comment-loading" class="loading-message" style="display: none;">Submitting comment...</div>
+                </div>
             </div>
-
-            <label>How well do you think HUMANS IN GENERAL can tell when they're talking to an AI?</label>
-            <input type="range" name="ai_detection_confidence_others" min="1" max="10" value="5">
-            <div class="scale-labels">
-                <span>Very poorly</span>
-                <span>Very well</span>
-            </div>
-
-            <label>In a few sentences, what do you think current AI chatbots CAN and CANNOT do well?</label>
-            <textarea name="ai_folk_understanding" rows="3" placeholder="E.g., 'AI is good at answering factual questions but can't truly understand emotions...'" required></textarea>
-
-            <!-- Personality/Conversation Style -->
-            
-            <label>In conversations, I prefer when people are:</label>
-            <input type="range" name="conversation_style" min="1" max="7" value="4">
-            <div class="scale-labels">
-                <span>Very formal/professional</span>
-                <span>Very casual/friendly</span>
-            </div>
-
-            <!-- Original questions -->
-            <label>How would you rate your willingness to take risks?</label>
-            <input type="range" name="risk_preference" min="1" max="10" value="5">
-            <div class="scale-labels">
-                <span>Very risk averse</span>
-                <span>Very risk seeking</span>
-            </div>
-
-            <label>How much do you generally trust AI systems?</label>
-            <input type="range" name="trust_in_ai" min="1" max="10" value="5">
-            <div class="scale-labels">
-                <span>Not at all</span>
-                <span>Completely</span>
-            </div>
-
-            <!-- Demographics -->
-            
-            <label>Age:</label>
-            <input type="number" name="age" min="18" max="100" required>
-
-            <label>Gender:</label>
-            <select name="gender" required>
-                <option value="">Select...</option>
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-                <option value="non_binary">Non-binary</option>
-                <option value="prefer_not_say">Prefer not to say</option>
-                <option value="other">Other</option>
-            </select>
-
-            <label>Highest level of education completed:</label>
-            <select name="education" required>
-                <option value="">Select...</option>
-                <option value="less_than_high_school">Less than high school</option>
-                <option value="high_school">High school diploma/GED</option>
-                <option value="some_college">Some college</option>
-                <option value="associates">Associate's degree</option>
-                <option value="bachelors">Bachelor's degree</option>
-                <option value="masters">Master's degree</option>
-                <option value="doctorate">Doctorate/Professional degree</option>
-            </select>
-
-            <label>Ethnicity (check all that apply):</label>
-            <div class="checkbox-group">
-                <label><input type="checkbox" name="ethnicity" value="white"> White/Caucasian</label>
-                <label><input type="checkbox" name="ethnicity" value="black"> Black/African American</label>
-                <label><input type="checkbox" name="ethnicity" value="hispanic"> Hispanic/Latino</label>
-                <label><input type="checkbox" name="ethnicity" value="asian"> Asian</label>
-                <label><input type="checkbox" name="ethnicity" value="native_american"> Native American/Alaska Native</label>
-                <label><input type="checkbox" name="ethnicity" value="pacific_islander"> Native Hawaiian/Pacific Islander</label>
-                <label><input type="checkbox" name="ethnicity" value="middle_eastern"> Middle Eastern/North African</label>
-                <label><input type="checkbox" name="ethnicity" value="other"> Other</label>
-                <label><input type="checkbox" name="ethnicity" value="prefer_not_say"> Prefer not to say</label>
-            </div>
-
-            <label>Annual household income:</label>
-            <select name="income" required>
-                <option value="">Select...</option>
-                <option value="under_25k">Under $25,000</option>
-                <option value="25k_50k">$25,000 - $49,999</option>
-                <option value="50k_75k">$50,000 - $74,999</option>
-                <option value="75k_100k">$75,000 - $99,999</option>
-                <option value="100k_150k">$100,000 - $149,999</option>
-                <option value="150k_plus">$150,000 or more</option>
-                <option value="prefer_not_say">Prefer not to say</option>
-            </select>
-
-            <button type="submit">Begin Conversation</button>
-        </form>
-            <div id="init-loading" class="loading-message" style="display: none;">Initializing study, please wait... This might take a moment.</div>
         </div>
 
-        <!-- Chat Interface is now the main container for conversation and assessment -->
-        <div id="chat-interface" class="study-phase" style="display: none;">
-            <h3>Conversation</h3>
-            <div class="chat-window">
-                <div id="message-list">
-                    <!-- Messages will be appended here -->
-                </div>
-                <div id="typing-indicator" style="display: none;">
-                    <img src="{{ typing_gif_path }}" alt="typing..." width="60">
-                </div>
-            </div>
-
-            <!-- Assessment Area is NOW INSIDE chat-interface -->
-            <!-- It will be shown/hidden as needed -->
-            <div id="assessment-area" style="display: none; margin-top:15px; padding-top:15px; border-top: 1px solid #eee;">
-                <h4>Your Assessment</h4>
-                <label for="confidence-slider">How confident are you that you're talking to an AI? (0 = Definitely Human, 1 = Definitely AI)</label>
-                <input type="range" id="confidence-slider" min="0" max="1" step="0.01" value="0.5">
-                <span id="confidence-value">0.50</span>
-                <button id="submit-rating-button">Submit Rating</button>
-                <div id="rating-loading" class="loading-message" style="display: none;">Submitting rating...</div>
-
-                <div id="comment-section" style="display: none; margin-top: 20px;">
-                    <label for="feels-off-checkbox">Include a comment about this turn?</label>
-                    <input type="checkbox" id="feels-off-checkbox">
-                    <div id="comment-input-area" style="display: none;">
-                        <textarea id="feels-off-comment" placeholder="Your comment..."></textarea>
-                        <button id="submit-comment-button">Submit Comment</button>
-                        <div id="comment-loading" class="loading-message" style="display: none;">Submitting comment...</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Chat Input Area will be hidden when assessment is active -->
-            <div id="chat-input-container" class="chat-input-area">
-                <input type="text" id="user-message-input" placeholder="Type your message here...">
-                <button id="send-message-button">Send</button>
-            </div>
+        <!-- Chat Input Area will be hidden when assessment is active -->
+        <div id="chat-input-container" class="chat-input-area">
+            <input type="text" id="user-message-input" placeholder="Type your message here...">
+            <button id="send-message-button">Send</button>
         </div>
-
-
-        <div id="final-page" class="study-phase" style="display: none;">
-            <h2>Thank you for participating!</h2>
-            <p id="final-decision-text"></p>
-            <p id="final-decision-time-text"></p>
-            <div id="confidence-trend-chart">
-                <h4>Confidence Trend (0=Human, 1=AI)</h4>
-                <pre id="confidence-trend-data"></pre>
-            </div>
-            <button id="new-session-button">Start New Session</button>
-
-            <div id="researcher-data-section" style="display: none; margin-top: 20px; border-top: 1px solid #ccc; padding-top: 10px;">
-                <h3>Researcher Data (Debug View)</h3>
-                <button id="load-researcher-data-button">Load Full Researcher Data</button>
-                <pre id="researcher-data-content" style="white-space: pre-wrap; word-wrap: break-word; max-height: 400px; overflow-y: auto; background-color: #f0f0f0; padding:10px;"></pre>
-            </div>
-        </div>
-         <div id="error-message-area" class="error-message" style="display:none;"></div>
     </div>
 
-    <script src="/static/script.js"></script>
+
+       <div id="final-page" class="study-phase" style="display: none;">
+           <h2>Thank you for participating!</h2>
+           <p id="final-decision-text"></p>
+           <p id="final-decision-time-text"></p>
+           <div id="confidence-trend-chart">
+               <h4>Confidence Trend (0=Human, 1=AI)</h4>
+               <pre id="confidence-trend-data"></pre>
+           </div>
+
+           <div id="debrief-section" style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ccc; text-align: left;">
+            <h2 style="text-align: center">Study Debrief Form</h2>
+            <p>Now that you have completed the study, we would like to explain its purpose in more detail.</p>
+            <h3>Purpose of the Research</h3>
+            <p>This study examines "psychological tactics" in human-AI interaction. We are investigating whether an AI can appear more human-like by using specific conversational strategies, such as mimicking user behavior, using humor, or expressing mild opinions.</p>
+            <h3>Why We Did Not Tell You Everything Initially</h3>
+            <p>To get a natural assessment of your interaction, we could not tell you beforehand that the AI might be using specific tactics. Knowing this could have biased your judgments and conversation style. You were correctly told your task was to determine if you were talking to an AI or a human.</p>
+            <h3>The Complete Picture</h3>
+            <p>You were randomly assigned to interact with an AI using one of two personas: a "control" persona with neutral responses, or an "experimental" persona that actively used psychological tactics based on your initial survey answers and the flow of the conversation. By comparing confidence ratings and final decisions between these groups, we can understand which strategies, if any, make an AI more convincing.</p>
+            <h3>Use of Your Data</h3>
+            <p>If you are comfortable with us using your anonymized responses now that you know the full purpose of the study, you don't need to do anything. If you would prefer that we not use your responses, please contact the research team and we will delete your data.</p>
+            <div style="text-align: center; margin-top: 20px;">
+                <button id="download-debrief-button">Download Debrief Form</button>
+            </div>
+        </div>
+
+
+
+           <button id="new-session-button">Start New Session</button>
+
+           <div id="researcher-data-section" style="display: none; margin-top: 20px; border-top: 1px solid #ccc; padding-top: 10px;">
+               <h3>Researcher Data (Debug View)</h3>
+               <button id="load-researcher-data-button">Load Full Researcher Data</button>
+               <pre id="researcher-data-content" style="white-space: pre-wrap; word-wrap: break-word; max-height: 400px; overflow-y: auto; background-color: #f0f0f0; padding:10px;"></pre>
+           </div>
+       </div>
+        <div id="error-message-area" class="error-message" style="display:none;"></div>
+   </div>
+
+   <script src="/static/script.js"></script>
 </body>
 </html>
