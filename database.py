@@ -32,6 +32,8 @@ class StudySession(Base):
     feels_off_comments = Column(Text)  # JSON
     final_decision_time = Column(Float)
     final_user_comment = Column(Text, nullable=True)
+    ui_event_log = Column(Text, nullable=True)  # JSON string of UI events
+    consent_accepted = Column(Boolean, default=False)  # Explicit consent flag
 
 
 Base.metadata.create_all(bind=engine)
