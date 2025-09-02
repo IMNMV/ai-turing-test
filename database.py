@@ -34,6 +34,8 @@ class StudySession(Base):
     final_user_comment = Column(Text, nullable=True)
     ui_event_log = Column(Text, nullable=True)  # JSON string of UI events
     consent_accepted = Column(Boolean, default=False)  # Explicit consent flag
+    total_study_time_minutes = Column(Float, nullable=True)  # Total time spent in study
+    forced_completion = Column(Boolean, default=False)  # Whether study ended due to time limit
 
 
 Base.metadata.create_all(bind=engine)
