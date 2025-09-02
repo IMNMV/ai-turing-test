@@ -7,6 +7,7 @@ import os
 import json
 import uuid
 import random
+import html
 from datetime import datetime
 
 from fastapi import FastAPI, Request, Depends, HTTPException
@@ -601,18 +602,22 @@ async def initialize_study(data: InitializeRequest):
     session_id = str(uuid.uuid4())
     
     # Create the full user profile from all the new fields
+    # Sanitize text inputs
+    sanitized_models = [html.escape(str(model)) for model in data.ai_models_used]
+    sanitized_ethnicity = [html.escape(str(eth)) for eth in data.ethnicity]
+    
     initial_user_profile_from_survey = {
         "ai_usage_frequency": data.ai_usage_frequency,
-        "ai_models_used": data.ai_models_used,
+        "ai_models_used": sanitized_models,
         "self_detection_speed": data.self_detection_speed,
         "others_detection_speed": data.others_detection_speed,
         "ai_capabilities_rating": data.ai_capabilities_rating,  
         "trust_in_ai": data.trust_in_ai,
         "age": data.age,
-        "gender": data.gender,
-        "education": data.education,
-        "ethnicity": data.ethnicity,
-        "income": data.income
+        "gender": html.escape(str(data.gender)),
+        "education": html.escape(str(data.education)),
+        "ethnicity": sanitized_ethnicity,
+        "income": html.escape(str(data.income))
     }
     
     assigned_context_for_convo, experimental_condition_val = assign_domain()
@@ -692,7 +697,8 @@ async def initialize_study(data: InitializeRequest):
 @app.post("/send_message")
 async def send_message(data: ChatRequest):
     session_id = data.session_id
-    user_message = data.message
+    # Sanitize user message
+    user_message = html.escape(str(data.message))
 
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -887,9 +893,12 @@ async def submit_comment(data: CommentRequest):
     # Determine turn number, which is null for final, pre-debrief feedback
     turn_number = session["turn_count"] if data.phase == 'in_turn' else None
 
+    # Sanitize comment
+    sanitized_comment = html.escape(str(data.comment))
+    
     session["feels_off_data"].append({
         "turn": turn_number,
-        "description": data.comment,
+        "description": sanitized_comment,
         "phase": data.phase
     })
 
@@ -928,7 +937,9 @@ async def submit_final_comment(data: FinalCommentRequest, db_session: Session = 
     if not session_record:
         raise HTTPException(status_code=404, detail="Could not find the completed study session to add comment to.")
     
-    session_record.final_user_comment = data.comment
+    # Sanitize final comment
+    sanitized_comment = html.escape(str(data.comment))
+    session_record.final_user_comment = sanitized_comment
     db_session.commit()
     print(f"Final comment added to session {data.session_id}.")
     return {"message": "Final comment received. Thank you."}
