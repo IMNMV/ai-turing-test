@@ -997,6 +997,5 @@ if __name__ == "__main__":
     else:
         # Corrected model name based on your `initialize_gemini_model_and_module`
         print("Gemini model initialized.")
-    # For local testing, you would run with: uvicorn main:app --reload
-    # Railway uses its own start command from railway.json
+    # local testing run with: uvicorn main:app --reload
     pass
