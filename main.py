@@ -833,8 +833,14 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
         "decision_time_seconds": actual_decision_time
     })
 
+    # Calculate total study time and check for forced completion
+    session_start = session.get("session_start_time", time.time())
+    elapsed_seconds = time.time() - session_start
+    elapsed_minutes = elapsed_seconds / 60
+    forced_completion = elapsed_minutes >= 20
+    
     study_over = False
-    if data.confidence == 0.0 or data.confidence == 1.0:
+    if data.confidence == 0.0 or data.confidence == 1.0 or forced_completion:
         session["ai_detected_final"] = (data.confidence == 1.0)
         session["final_decision_time_seconds_ddm"] = actual_decision_time
         
@@ -860,7 +866,9 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
             feels_off_comments=json.dumps(session["feels_off_data"]),
             final_decision_time=session["final_decision_time_seconds_ddm"],
             ui_event_log=json.dumps(ui_events),
-            consent_accepted=consent_accepted
+            consent_accepted=consent_accepted,
+            total_study_time_minutes=elapsed_minutes,
+            forced_completion=forced_completion
         )
         db_session.add(db_study_session)
         db_session.commit()
@@ -997,5 +1005,6 @@ if __name__ == "__main__":
     else:
         # Corrected model name based on your `initialize_gemini_model_and_module`
         print("Gemini model initialized.")
-    # local testing run with: uvicorn main:app --reload
+    # For local testing, you would run with: uvicorn main:app --reload
+    # Railway uses its own start command from railway.json
     pass
