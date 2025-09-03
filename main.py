@@ -1,4 +1,6 @@
 # main.py
+
+
 import numpy as np
 import time
 import os
@@ -561,6 +563,9 @@ class RatingRequest(BaseModel):
     session_id: str
     confidence: float
     decision_time_seconds: Optional[float] = None
+    reading_time_seconds: Optional[float] = None
+    active_decision_time_seconds: Optional[float] = None
+    slider_interaction_log: Optional[List[Dict[str, Any]]] = None
 
 class CommentRequest(BaseModel):
     session_id: str
@@ -828,7 +833,10 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
     session["intermediate_ddm_confidence_ratings"].append({
         "turn": session["turn_count"],
         "confidence": data.confidence,
-        "decision_time_seconds": actual_decision_time
+        "decision_time_seconds": actual_decision_time,
+        "reading_time_seconds": data.reading_time_seconds,
+        "active_decision_time_seconds": data.active_decision_time_seconds,
+        "slider_interaction_log": data.slider_interaction_log
     })
 
     # NEW: Check if this is the first pure DDM decision (0.0 or 1.0)
