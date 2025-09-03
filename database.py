@@ -40,6 +40,9 @@ class StudySession(Base):
     pure_ddm_timestamp = Column(DateTime, nullable=True)  # When they made it
     pure_ddm_turn_number = Column(Integer, nullable=True)  # Which message turn
     pure_ddm_decision_time_seconds = Column(Float, nullable=True)  # Time to make pure decision
+    reading_time_seconds = Column(Float, nullable=True)  # Time from AI response to first slider touch  
+    active_decision_time_seconds = Column(Float, nullable=True)  # Time from first slider touch to submit
+    slider_interaction_log = Column(Text, nullable=True)  # JSON of all slider interactions per turn
 
 
 Base.metadata.create_all(bind=engine)
