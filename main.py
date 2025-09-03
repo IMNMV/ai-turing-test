@@ -833,6 +833,17 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
         "decision_time_seconds": actual_decision_time
     })
 
+    # NEW: Check if this is the first pure DDM decision (0.0 or 1.0)
+    is_pure_decision = data.confidence == 0.0 or data.confidence == 1.0
+    first_pure_decision = is_pure_decision and "pure_ddm_decision" not in session
+    
+    if first_pure_decision:
+        session["pure_ddm_decision"] = data.confidence
+        session["pure_ddm_timestamp"] = datetime.now()
+        session["pure_ddm_turn_number"] = session["turn_count"]
+        session["pure_ddm_decision_time_seconds"] = actual_decision_time
+        print(f"Pure DDM decision captured: {data.confidence} at turn {session['turn_count']}")
+
     # Calculate total study time and check for forced completion
     session_start = session.get("session_start_time", time.time())
     elapsed_seconds = time.time() - session_start
@@ -840,7 +851,7 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
     forced_completion = elapsed_minutes >= 20
     
     study_over = False
-    if data.confidence == 0.0 or data.confidence == 1.0 or forced_completion:
+    if forced_completion:  # Study only ends on 20-minute timer, not on confidence selection
         session["ai_detected_final"] = (data.confidence == 1.0)
         session["final_decision_time_seconds_ddm"] = actual_decision_time
         
@@ -868,7 +879,12 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
             ui_event_log=json.dumps(ui_events),
             consent_accepted=consent_accepted,
             total_study_time_minutes=elapsed_minutes,
-            forced_completion=forced_completion
+            forced_completion=forced_completion,
+            # NEW: Pure DDM columns
+            pure_ddm_decision=session.get("pure_ddm_decision"),
+            pure_ddm_timestamp=session.get("pure_ddm_timestamp"),
+            pure_ddm_turn_number=session.get("pure_ddm_turn_number"),
+            pure_ddm_decision_time_seconds=session.get("pure_ddm_decision_time_seconds")
         )
         db_session.add(db_study_session)
         db_session.commit()
