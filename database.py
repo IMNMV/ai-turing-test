@@ -36,6 +36,10 @@ class StudySession(Base):
     consent_accepted = Column(Boolean, default=False)  # Explicit consent flag
     total_study_time_minutes = Column(Float, nullable=True)  # Total time spent in study
     forced_completion = Column(Boolean, default=False)  # Whether study ended due to time limit
+    pure_ddm_decision = Column(Float, nullable=True)  # First 0.0 or 1.0 selection
+    pure_ddm_timestamp = Column(DateTime, nullable=True)  # When they made it
+    pure_ddm_turn_number = Column(Integer, nullable=True)  # Which message turn
+    pure_ddm_decision_time_seconds = Column(Float, nullable=True)  # Time to make pure decision
 
 
 Base.metadata.create_all(bind=engine)
