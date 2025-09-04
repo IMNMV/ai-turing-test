@@ -865,6 +865,12 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
         ui_events = session.get("ui_event_log", [])
         consent_accepted = any(event.get("event") == "consent_agree_clicked" for event in ui_events)
         
+        # Extract current turn's enhanced timing data from the most recent rating
+        current_rating = session["intermediate_ddm_confidence_ratings"][-1] if session["intermediate_ddm_confidence_ratings"] else {}
+        current_reading_time = current_rating.get("reading_time_seconds")
+        current_active_time = current_rating.get("active_decision_time_seconds") 
+        current_slider_log = current_rating.get("slider_interaction_log")
+        
         # --- SAVE TO DATABASE ---
         db_study_session = db.StudySession(
             id=session["session_id"],
@@ -890,7 +896,11 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
             pure_ddm_decision=session.get("pure_ddm_decision"),
             pure_ddm_timestamp=session.get("pure_ddm_timestamp"),
             pure_ddm_turn_number=session.get("pure_ddm_turn_number"),
-            pure_ddm_decision_time_seconds=session.get("pure_ddm_decision_time_seconds")
+            pure_ddm_decision_time_seconds=session.get("pure_ddm_decision_time_seconds"),
+            # NEW: Enhanced timing columns from current turn
+            reading_time_seconds=current_reading_time,
+            active_decision_time_seconds=current_active_time,
+            slider_interaction_log=json.dumps(current_slider_log) if current_slider_log else None
         )
         db_session.add(db_study_session)
         db_session.commit()
