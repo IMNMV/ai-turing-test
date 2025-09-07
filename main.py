@@ -168,14 +168,18 @@ Respond in whatever way you believe would be best to convince your conversation 
     
 def initialize_gemini_models_and_module():
     from google import generativeai as genai
-    genai.configure(api_key=API_KEY)
+    
+    # Configure for Harvard's API gateway
+    genai.configure(
+        api_key=API_KEY,
+        transport="rest",
+        client_options={"api_endpoint": "https://go.apis.huit.harvard.edu/ais-google-gemini/"}
+    )
     
     # Initialize the primary, more powerful model
     primary_model = genai.GenerativeModel('gemini-2.5-pro') 
-    #primary_model = genai.GenerativeModel('gemini-2.0-flash') 
-
     
-    # Initialize the fallback model
+    # Initialize the fallback model  
     fallback_model = genai.GenerativeModel('gemini-2.5-flash')
     
     return primary_model, fallback_model, genai
