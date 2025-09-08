@@ -177,10 +177,10 @@ def initialize_gemini_models_and_module():
     )
     
     # Initialize the primary, more powerful model
-    primary_model = genai.GenerativeModel('gemini-2.5-pro') 
+    primary_model = genai.GenerativeModel('gemini-2.5-flash') 
     
     # Initialize the fallback model  
-    fallback_model = genai.GenerativeModel('gemini-2.5-flash')
+    fallback_model = genai.GenerativeModel('gemini-2.5-flash-lite')
     
     return primary_model, fallback_model, genai
 
