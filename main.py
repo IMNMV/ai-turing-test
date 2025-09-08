@@ -511,13 +511,32 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
             return full_text.strip(), "No researcher notes provided (keyword missing)."
 
     except Exception as e:
-        print(f"--- WARNING: Primary model (Pro) failed: {e}. Switching to fallback model (Flash) for this turn. ---")
+        # Enhanced Railway logging for primary model failure
+        print("=" * 60)
+        print("PRIMARY MODEL FAILURE - SWITCHING TO FALLBACK")
+        print("=" * 60)
+        print(f"Timestamp: {datetime.utcnow().isoformat()}Z")
+        print(f"Primary Model Error: {str(e)}")
+        print(f"Error Type: {type(e).__name__}")
+        print(f"Chosen Persona: {chosen_persona_key}")
+        print(f"Technique: {technique}")
+        print(f"Prompt Length: {len(prompt)} chars")
+        print("Attempting fallback model...")
+        print("=" * 60)
         
         try:
             # --- ATTEMPT 2: FALLBACK MODEL (FLASH) ---
-            # print("Attempting to generate response with GEMINI_FLASH_MODEL...")
             response_fallback = GEMINI_FLASH_MODEL.generate_content(contents=system_prompt, safety_settings=safety_settings)
             full_text_fallback = response_fallback.text
+            
+            # Log successful fallback
+            print("=" * 60)
+            print("FALLBACK MODEL SUCCESS")
+            print("=" * 60)
+            print(f"Timestamp: {datetime.utcnow().isoformat()}Z")
+            print(f"Fallback response length: {len(full_text_fallback)} chars")
+            print("Primary model failure recovered successfully")
+            print("=" * 60)
             
             if "RESEARCHER_NOTES:" in full_text_fallback:
                 user_text, researcher_notes_section = full_text_fallback.split("RESEARCHER_NOTES:", 1)
@@ -530,8 +549,21 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
 
         except Exception as e_fallback:
             # --- BOTH MODELS FAILED ---
-            print(f"--- CRITICAL: Fallback model (Flash) also failed: {e_fallback}. Returning a generic response. ---")
-            generic_response = "I'm not sure how to respond to that. Could we talk about something else?"
+            print("=" * 60)
+            print("CRITICAL: ALL MODELS FAILED")
+            print("=" * 60)
+            print(f"Timestamp: {datetime.utcnow().isoformat()}Z")
+            print(f"Primary Model Error: {str(e)}")
+            print(f"Primary Error Type: {type(e).__name__}")
+            print(f"Fallback Model Error: {str(e_fallback)}")
+            print(f"Fallback Error Type: {type(e_fallback).__name__}")
+            print(f"Chosen Persona: {chosen_persona_key}")
+            print(f"Technique: {technique}")
+            print(f"Prompt Length: {len(prompt)} chars")
+            print("Returning generic response to prevent study interruption")
+            print("=" * 60)
+            
+            generic_response = "I literally don't know how to respond to that"
             researcher_notes = f"CRITICAL FAILURE: Both models failed. Primary Error: {e}. Fallback Error: {e_fallback}."
             return generic_response, researcher_notes
 
@@ -715,6 +747,47 @@ async def initialize_study(data: InitializeRequest):
     sessions[session_id]["experimental_condition"] = chosen_persona_key
 
     return {"session_id": session_id, "message": "Study initialized. You can start the conversation."}
+
+
+@app.post("/debug_log")
+async def debug_log(request: Request):
+    """Internal debug logging endpoint - logs frontend errors to Railway only"""
+    try:
+        data = await request.json()
+        
+        # Extract debug info
+        error_type = data.get("error_type", "Unknown")
+        error_message = data.get("error_message", "No message")
+        session_id = data.get("session_id", "Unknown")
+        current_turn = data.get("current_turn", "Unknown")
+        timestamp = data.get("timestamp", "Unknown")
+        stack_trace = data.get("stack_trace", "No stack trace")
+        additional_context = data.get("additional_context", {})
+        
+        # Log to Railway (server logs only)
+        print("=" * 60)
+        print("FRONTEND ERROR CAPTURED")
+        print("=" * 60)
+        print(f"Timestamp: {timestamp}")
+        print(f"Session ID: {session_id}")
+        print(f"Current Turn: {current_turn}")
+        print(f"Error Type: {error_type}")
+        print(f"Error Message: {error_message}")
+        print(f"Stack Trace: {stack_trace}")
+        if additional_context:
+            print(f"Additional Context: {json.dumps(additional_context, indent=2)}")
+        print("=" * 60)
+        
+        return {"status": "logged"}
+        
+    except Exception as e:
+        # Fallback logging if JSON parsing fails
+        print("=" * 60)
+        print("DEBUG LOG ENDPOINT ERROR")
+        print("=" * 60)
+        print(f"Failed to parse debug log request: {str(e)}")
+        print("=" * 60)
+        return {"status": "error", "message": str(e)}
 
 
 @app.post("/send_message")
