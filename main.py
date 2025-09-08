@@ -751,29 +751,36 @@ async def initialize_study(data: InitializeRequest):
 
 @app.post("/debug_log")
 async def debug_log(request: Request):
-    """Internal debug logging endpoint - logs frontend errors to Railway only"""
+    """Internal debug logging endpoint - logs frontend debug info to Railway only"""
     try:
         data = await request.json()
         
         # Extract debug info
-        error_type = data.get("error_type", "Unknown")
-        error_message = data.get("error_message", "No message")
+        log_type = data.get("error_type", "Unknown")
+        log_message = data.get("error_message", "No message")
         session_id = data.get("session_id", "Unknown")
         current_turn = data.get("current_turn", "Unknown")
         timestamp = data.get("timestamp", "Unknown")
         stack_trace = data.get("stack_trace", "No stack trace")
         additional_context = data.get("additional_context", {})
         
+        # Determine if this is an actual error or just debug info
+        is_error = log_type.endswith('_ERROR') or 'ERROR' in log_type or 'FRONTEND_ERROR' in log_type
+        
         # Log to Railway (server logs only)
         print("=" * 60)
-        print("FRONTEND ERROR CAPTURED")
+        if is_error:
+            print("FRONTEND ERROR CAPTURED")
+        else:
+            print("FRONTEND DEBUG INFO")
         print("=" * 60)
         print(f"Timestamp: {timestamp}")
         print(f"Session ID: {session_id}")
         print(f"Current Turn: {current_turn}")
-        print(f"Error Type: {error_type}")
-        print(f"Error Message: {error_message}")
-        print(f"Stack Trace: {stack_trace}")
+        print(f"Log Type: {log_type}")
+        print(f"Message: {log_message}")
+        if stack_trace != "No stack trace":
+            print(f"Stack Trace: {stack_trace}")
         if additional_context:
             print(f"Additional Context: {json.dumps(additional_context, indent=2)}")
         print("=" * 60)
