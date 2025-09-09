@@ -29,7 +29,7 @@ if not API_KEY:
 
 # --- NEW Response Timing Configuration (from the paper) ---
 RESPONSE_DELAY_MIN_BASE_SECONDS = 1.5  # The '1' in the formula
-RESPONSE_DELAY_PER_CHAR_MEAN = 0.09    # Paper uses 0.3, but that feels very long for typing. Let's start with 0.03-0.05. Let's use 0.03 for now.
+RESPONSE_DELAY_PER_CHAR_MEAN = 0.3    # Paper uses 0.3, but that feels very long for typing. Let's start with 0.03-0.05. Let's use 0.03 for now.
 RESPONSE_DELAY_PER_CHAR_STD = 0.005   # Std dev for per character delay
 RESPONSE_DELAY_PER_PREV_CHAR_MEAN = 0.015 # Paper uses 0.03, adjusted. For reading time.
 RESPONSE_DELAY_PER_PREV_CHAR_STD = 0.001 # Std dev for per previous character delay
@@ -177,10 +177,10 @@ def initialize_gemini_models_and_module():
     )
     
     # Initialize the primary, more powerful model
-    primary_model = genai.GenerativeModel('gemini-2.5-flash') 
+    primary_model = genai.GenerativeModel('gemini-2.5-pro') 
     
     # Initialize the fallback model  
-    fallback_model = genai.GenerativeModel('gemini-2.5-flash-lite')
+    fallback_model = genai.GenerativeModel('gemini-2.5-flash')
     
     return primary_model, fallback_model, genai
 
@@ -841,14 +841,56 @@ async def send_message(data: ChatRequest):
     for entry in session["conversation_log"]:
         simple_history_for_your_prompt.append({"user": entry["user"], "assistant": entry.get("assistant", "")})
 
-    ai_response_text, researcher_notes = generate_ai_response(
-        GEMINI_MODEL,
-        user_message,
-        tactic_key_for_this_turn,
-        session["initial_user_profile_survey"],
-        simple_history_for_your_prompt,
-        retrieved_chosen_persona_key
-    )
+    # NEW: Retry logic for AI response generation
+    max_retries = 3
+    ai_response_text = None
+    researcher_notes = None
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"--- DEBUG: AI Response Generation Attempt {attempt}/{max_retries} ---")
+            
+            ai_response_text, researcher_notes = generate_ai_response(
+                GEMINI_MODEL,
+                user_message,
+                tactic_key_for_this_turn,
+                session["initial_user_profile_survey"],
+                simple_history_for_your_prompt,
+                retrieved_chosen_persona_key
+            )
+            
+            # If we get here, generation succeeded
+            print(f"--- DEBUG: AI Response Generation Succeeded on Attempt {attempt} ---")
+            break
+            
+        except Exception as e:
+            print("=" * 60)
+            print(f"AI RESPONSE GENERATION FAILED - ATTEMPT {attempt}/{max_retries}")
+            print("=" * 60)
+            print(f"Timestamp: {datetime.utcnow().isoformat()}Z")
+            print(f"Session ID: {session_id}")
+            print(f"Turn: {current_ai_response_turn}")
+            print(f"User Message: {user_message}")
+            print(f"Persona: {retrieved_chosen_persona_key}")
+            print(f"Tactic: {tactic_key_for_this_turn}")
+            print(f"Error: {str(e)}")
+            print(f"Error Type: {type(e).__name__}")
+            if hasattr(e, '__traceback__'):
+                import traceback
+                print(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
+            print("=" * 60)
+            
+            if attempt == max_retries:
+                # All attempts failed - this should not happen due to fallback models in generate_ai_response
+                print("=" * 60)
+                print("CRITICAL: ALL AI GENERATION ATTEMPTS FAILED")
+                print("=" * 60)
+                print("This should not happen due to fallback models. Returning emergency response.")
+                print("=" * 60)
+                
+                ai_response_text = "I literally don't know how to respond to that"
+                researcher_notes = f"CRITICAL: All {max_retries} AI generation attempts failed. Emergency response used. Final error: {str(e)}"
+                break
 
     ai_text_length = len(ai_response_text)
     print(f"--- DEBUG (Turn {current_ai_response_turn}, Session {session_id}): Persona: {retrieved_chosen_persona_key} | Tactic: {tactic_key_for_this_turn or 'None'} | AI Resp Len: {ai_text_length}c ---")
