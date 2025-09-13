@@ -43,6 +43,10 @@ class StudySession(Base):
     reading_time_seconds = Column(Float, nullable=True)  # Time from AI response to first slider touch  
     active_decision_time_seconds = Column(Float, nullable=True)  # Time from first slider touch to submit
     slider_interaction_log = Column(Text, nullable=True)  # JSON of all slider interactions per turn
+    # NEW: Session status tracking for incremental saves
+    session_status = Column(String, default="active")  # active, completed, interrupted
+    last_updated = Column(DateTime, default=datetime.utcnow)  # Track when session was last updated
+    recovered_from_restart = Column(Boolean, default=False)  # Flag if session continued after Railway restart
 
 
 Base.metadata.create_all(bind=engine)
