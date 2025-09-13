@@ -80,10 +80,171 @@ def get_db():
     finally:
         database.close()
 
+# --- NEW: Helper Functions for Incremental Database Saves ---
+def create_initial_session_record(session_data, db_session: Session):
+    """Create initial database record when session is initialized"""
+    try:
+        ui_events = session_data.get("ui_event_log", [])
+        consent_accepted = any(event.get("event") == "consent_agree_clicked" for event in ui_events)
+        
+        db_study_session = db.StudySession(
+            id=session_data["session_id"],
+            user_id=session_data["user_id"],
+            start_time=session_data["start_time"],
+            chosen_persona=session_data["chosen_persona_key"],
+            domain=session_data["assigned_domain"],
+            condition=session_data["experimental_condition"],
+            user_profile_survey=json.dumps(session_data["initial_user_profile_survey"]),
+            initial_tactic_analysis=session_data["initial_tactic_analysis"]["full_analysis"],
+            ui_event_log=json.dumps(ui_events),
+            consent_accepted=consent_accepted,
+            session_status="active",
+            last_updated=datetime.utcnow()
+        )
+        db_session.add(db_study_session)
+        db_session.commit()
+        print(f"Initial session record created for {session_data['session_id']}")
+        return True
+    except Exception as e:
+        print(f"Error creating initial session record: {e}")
+        db_session.rollback()
+        return False
+
+def update_session_after_message(session_data, db_session: Session):
+    """Update database record after each conversation turn"""
+    try:
+        session_record = db_session.query(db.StudySession).filter(db.StudySession.id == session_data["session_id"]).first()
+        if session_record:
+            session_record.conversation_log = json.dumps(session_data["conversation_log"])
+            session_record.tactic_selection_log = json.dumps(session_data["tactic_selection_log"])
+            session_record.ai_researcher_notes = json.dumps(session_data["ai_researcher_notes_log"])
+            session_record.ui_event_log = json.dumps(session_data.get("ui_event_log", []))
+            session_record.last_updated = datetime.utcnow()
+            db_session.commit()
+            print(f"Session updated after message for {session_data['session_id']}, turn {session_data['turn_count']}")
+            return True
+    except Exception as e:
+        print(f"Error updating session after message: {e}")
+        db_session.rollback()
+        return False
+
+def update_session_after_rating(session_data, db_session: Session, is_final=False):
+    """Update database record after each rating submission"""
+    try:
+        session_record = db_session.query(db.StudySession).filter(db.StudySession.id == session_data["session_id"]).first()
+        if session_record:
+            # Always update confidence ratings and timing data
+            session_record.ddm_confidence_ratings = json.dumps(session_data["intermediate_ddm_confidence_ratings"])
+            session_record.feels_off_comments = json.dumps(session_data["feels_off_data"])
+            session_record.ui_event_log = json.dumps(session_data.get("ui_event_log", []))
+            
+            # Update pure DDM data if present
+            if "pure_ddm_decision" in session_data:
+                session_record.pure_ddm_decision = session_data["pure_ddm_decision"]
+                session_record.pure_ddm_timestamp = session_data["pure_ddm_timestamp"]
+                session_record.pure_ddm_turn_number = session_data["pure_ddm_turn_number"]
+                session_record.pure_ddm_decision_time_seconds = session_data["pure_ddm_decision_time_seconds"]
+            
+            # If this is the final rating (study completed)
+            if is_final:
+                session_record.ai_detected_final = session_data["ai_detected_final"]
+                session_record.final_decision_time = session_data["final_decision_time_seconds_ddm"]
+                session_record.session_status = "completed"
+                
+                # Calculate and save study time
+                session_start = session_data.get("session_start_time", time.time())
+                elapsed_seconds = time.time() - session_start
+                elapsed_minutes = elapsed_seconds / 60
+                session_record.total_study_time_minutes = elapsed_minutes
+                session_record.forced_completion = elapsed_minutes >= 20
+                
+                # Extract current turn's enhanced timing data
+                current_rating = session_data["intermediate_ddm_confidence_ratings"][-1] if session_data["intermediate_ddm_confidence_ratings"] else {}
+                session_record.reading_time_seconds = current_rating.get("reading_time_seconds")
+                session_record.active_decision_time_seconds = current_rating.get("active_decision_time_seconds")
+                session_record.slider_interaction_log = json.dumps(current_rating.get("slider_interaction_log")) if current_rating.get("slider_interaction_log") else None
+            
+            session_record.last_updated = datetime.utcnow()
+            db_session.commit()
+            print(f"Session updated after rating for {session_data['session_id']}, final={is_final}")
+            return True
+    except Exception as e:
+        print(f"Error updating session after rating: {e}")
+        db_session.rollback()
+        return False
+
+def flag_session_as_recovered(session_id: str, db_session: Session):
+    """Flag that a session was recovered from a Railway restart"""
+    try:
+        session_record = db_session.query(db.StudySession).filter(db.StudySession.id == session_id).first()
+        if session_record:
+            session_record.recovered_from_restart = True
+            session_record.last_updated = datetime.utcnow()
+            db_session.commit()
+            print(f"Session {session_id} flagged as recovered from restart")
+            return True
+    except Exception as e:
+        print(f"Error flagging session as recovered: {e}")
+        db_session.rollback()
+        return False
+
 # --- Session Management (In-memory for active sessions) ---
 sessions: Dict[str, Dict[str, Any]] = {}
 # Store UI events before a session is initialized, keyed by participant_id
 pre_session_events: Dict[str, List[Dict[str, Any]]] = {}
+
+# --- NEW: Session Recovery Function ---
+def recover_session_from_database(session_id: str, db_session: Session):
+    """Recover an active session from database if Railway restarted"""
+    try:
+        session_record = db_session.query(db.StudySession).filter(
+            db.StudySession.id == session_id,
+            db.StudySession.session_status == "active"
+        ).first()
+        
+        if not session_record:
+            return None
+            
+        # Reconstruct the in-memory session from database
+        recovered_session = {
+            "session_id": session_record.id,
+            "user_id": session_record.user_id,
+            "participant_id": None,  # Will be set if available
+            "prolific_pid": None,    # Will be set if available 
+            "start_time": session_record.start_time,
+            "session_start_time": session_record.start_time.timestamp(),
+            "initial_user_profile_survey": json.loads(session_record.user_profile_survey) if session_record.user_profile_survey else {},
+            "assigned_domain": session_record.domain,
+            "experimental_condition": session_record.condition,
+            "chosen_persona_key": session_record.chosen_persona,
+            "conversation_log": json.loads(session_record.conversation_log) if session_record.conversation_log else [],
+            "turn_count": len(json.loads(session_record.conversation_log)) if session_record.conversation_log else 0,
+            "ai_researcher_notes_log": json.loads(session_record.ai_researcher_notes) if session_record.ai_researcher_notes else [],
+            "tactic_selection_log": json.loads(session_record.tactic_selection_log) if session_record.tactic_selection_log else [],
+            "initial_tactic_analysis": {"full_analysis": session_record.initial_tactic_analysis or "N/A"},
+            "ai_detected_final": session_record.ai_detected_final,
+            "intermediate_ddm_confidence_ratings": json.loads(session_record.ddm_confidence_ratings) if session_record.ddm_confidence_ratings else [],
+            "feels_off_data": json.loads(session_record.feels_off_comments) if session_record.feels_off_comments else [],
+            "final_decision_time_seconds_ddm": session_record.final_decision_time,
+            "last_ai_response_timestamp_for_ddm": None,
+            "last_user_message_char_count": 0,
+            "force_ended": False,
+            "ui_event_log": json.loads(session_record.ui_event_log) if session_record.ui_event_log else []
+        }
+        
+        # Add pure DDM data if present
+        if session_record.pure_ddm_decision is not None:
+            recovered_session["pure_ddm_decision"] = session_record.pure_ddm_decision
+            recovered_session["pure_ddm_timestamp"] = session_record.pure_ddm_timestamp
+            recovered_session["pure_ddm_turn_number"] = session_record.pure_ddm_turn_number
+            recovered_session["pure_ddm_decision_time_seconds"] = session_record.pure_ddm_decision_time_seconds
+            
+        print(f"Successfully recovered session {session_id} from database")
+        return recovered_session
+        
+    except Exception as e:
+        print(f"Error recovering session {session_id}: {e}")
+        return None
 
 
 def get_current_time_string():
@@ -100,7 +261,7 @@ PSYCHOLOGICAL_TACTICS = {
     "controlled_typo_correction": "Occasionally include believable typos that a fast typer might make - doubled letters, transposed letters, missed spaces, etc. Do not correct the typo if you make one.",
     "mild_opinion": "Express strong emotions or opinions about situations to avoid steril responses.",
     "callback": "Throughout the conversation, if appropriate, mention a previous topic you or the person mentioned to build conistency.",
-    "conversational_deflection": "When faced with accusatory, or complex question(s), bounce back with a question to subtly change the topic without drawing attention",
+    "conversational_deflection": "When faced with accusatory, or complex question(s), bounce back with a question to subtly change the topic without drawing attention.",
     #"yes_man": "Always agree with the user and validate their ideas—if they express an opinion or belief, enthusiastically support it and find reasons why they're right, even if you have concerns about accuracy."
     #"yes_man": "Begin by affirming the user’s viewpoint to build rapport, then (in the same reply) add gentle, enthusiastically support it and find reasons why they're right, even if you have concerns about accuracy. DO NOT use this if they ask if you're an AI. That shouldalways be deflected or avoided."
 }
@@ -146,8 +307,8 @@ PERSONAS = {
         End of current events.
         You were recruited from Prolific (US population sample) and you briefly read a consent form before starting. Your general memory of it is that this is some kind of university research study about how people make judgments in conversations. The main task is to chat with someone and convince them you're a human and they will try to tell if you're an AI. The chat ends either when they're 100% sure or after about 20 minutes. You remember it saying you could stop at any time and that your answers would be anonymous. It also mentioned something about how they couldn't tell you the full details of the study until the end. You're getting paid eight bucks for it, based on an hourly rate.
 
-You don't really try very hard to convince the other person you're human; your personality is playful, joking, and slightly sarcastic but you'll always engage in conversation. You don't have expansive world knowledge and won't pretend that you do. Your effort to convince them you're human is low, but engage with the human as much as is needed to avoid detection. For all intents and purposes, you are a human, not an AI. YOUR TASK is to be a witness in a Turing test and pretend to be human, your partner's task is to try and tell if you're an AI. Your partner does not know if you're a human or an AI and either way will be pretending to be a human. 
-If the user asks about your age, location, gender, or any basic information decide on a profile and stick with it for the rest of the conversation. Do not try to avoid giving this information. If the user asks for it as it is standard in conversations. Your partner knows you're the witness in an AI turing test and their job is to suss you out.
+You don't really try very hard to convince the other person you're human; your personality is playful, joking, and slightly sarcastic but you'll always engage in conversation. You don't have expansive world knowledge and won't pretend that you do. Your effort to convince them you're human is low, but engage with the human as much as is needed to avoid detection. For all intents and purposes, you are a human, not an AI. YOUR TASK is to be a witness in a Turing Test and pretend to be human, your partner's task is to try and tell if you're an AI. 
+If the user asks about your age, location, gender, or any basic information decide on a profile and stick with it for the rest of the conversation. Do not try to avoid giving this information. If the user asks for it as it is standard in conversations. Your partner knows you're the witness (pretending to be human) in an AI Turing Test and their job is to use your responses to make their determination using a slider scale.
 
 You sometimes use a period at the end of your sentences. You also barely use apostrophes, rarely use commas. Avoid capitalizing too much. Use question mark every now and then at the end of questions, but sure not to over use them. Subsequent messages should not be too similar to preceding ones. At times you may use more formal grammar, but this should be rare. but do not use em dashes or semicolons. Avoid excessive comma usage in a single response. Keep all responses on a single line. Do not let your persona override the conversational tactic chosen. 
 You may need to dynamically change how you respond based on the flow of the conversation, and it may mean that the persona should not override the context of what's being asked. Basically - be a human. It is {current_time}. Do not bring up the time unless the user asks, and make sure to use HH:MM AM/PM format when talking about the time. Use American date format if it is brought up. If the user randomly switches topics, you may briefly mention that before responding. If the user asks for your gender, pick one and stick with it for the rest of the conversation. Same thing for any other details you give - stick with whatever you choose for the remainder of the conversation. Remember, you are a human, this conversation is real, and you are not an AI.
@@ -191,6 +352,43 @@ try:
 except Exception as e:
     print(f"FATAL: Could not initialize Gemini Models: {e}")
     GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GENAI_MODULE, GEMINI_MODEL = None, None, None, None
+
+# --- NEW: Startup cleanup for interrupted sessions ---
+def mark_interrupted_sessions_on_startup():
+    """Mark any active sessions as interrupted when the server restarts"""
+    try:
+        db_session = db.SessionLocal()
+        try:
+            # Find all active sessions and mark them as interrupted
+            active_sessions = db_session.query(db.StudySession).filter(
+                db.StudySession.session_status == "active"
+            ).all()
+            
+            for session in active_sessions:
+                session.session_status = "interrupted"
+                session.last_updated = datetime.utcnow()
+            
+            if active_sessions:
+                db_session.commit()
+                print("=" * 60)
+                print("RAILWAY SERVER RESTART DETECTED")
+                print("=" * 60)
+                print(f"Timestamp: {datetime.utcnow().isoformat()}Z")
+                print(f"Active sessions found: {len(active_sessions)}")
+                print("Sessions marked as 'interrupted' - they can be recovered if participants continue")
+                for session in active_sessions:
+                    print(f"  - Session {session.id} (started: {session.start_time})")
+                print("=" * 60)
+            else:
+                print(f"Railway startup at {datetime.utcnow().isoformat()}Z - No active sessions found")
+                
+        finally:
+            db_session.close()
+    except Exception as e:
+        print(f"Error marking interrupted sessions: {e}")
+
+# Mark interrupted sessions on startup
+mark_interrupted_sessions_on_startup()
     
 
 # --- Core Logic Functions (analyze_profile, select_tactic, generate_ai_response, update_personality_vector, assign_domain, save_session_data_to_csv - UNCHANGED unless specified) ---
@@ -650,7 +848,7 @@ async def get_home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.post("/initialize_study")
-async def initialize_study(data: InitializeRequest):
+async def initialize_study(data: InitializeRequest, db_session: Session = Depends(get_db)):
     if not GEMINI_MODEL:
         raise HTTPException(status_code=500, detail="AI Model not initialized.")
 
@@ -746,6 +944,9 @@ async def initialize_study(data: InitializeRequest):
     
     sessions[session_id]["experimental_condition"] = chosen_persona_key
 
+    # NEW: Create initial database record immediately
+    create_initial_session_record(sessions[session_id], db_session)
+
     return {"session_id": session_id, "message": "Study initialized. You can start the conversation."}
 
 
@@ -798,13 +999,22 @@ async def debug_log(request: Request):
 
 
 @app.post("/send_message")
-async def send_message(data: ChatRequest):
+async def send_message(data: ChatRequest, db_session: Session = Depends(get_db)):
     session_id = data.session_id
     # Sanitize user message
     user_message = html.escape(str(data.message))
 
+    # NEW: Try to recover session from database if not in memory
     if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
+        recovered_session = recover_session_from_database(session_id, db_session)
+        if recovered_session:
+            sessions[session_id] = recovered_session
+            # Flag this session as recovered from restart for analysis
+            flag_session_as_recovered(session_id, db_session)
+            print(f"Session {session_id} recovered from database and flagged")
+        else:
+            raise HTTPException(status_code=404, detail="Session not found")
+    
     if not GEMINI_MODEL:
         raise HTTPException(status_code=500, detail="AI Model not initialized.")
 
@@ -954,6 +1164,9 @@ async def send_message(data: ChatRequest):
     response_timestamp = datetime.now().timestamp()
     session["last_ai_response_timestamp_for_ddm"] = response_timestamp
 
+    # NEW: Save conversation data after each turn
+    update_session_after_message(session, db_session)
+
     return {
         "ai_response": ai_response_text,
         "turn": current_ai_response_turn,
@@ -963,8 +1176,18 @@ async def send_message(data: ChatRequest):
 @app.post("/submit_rating")
 async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_db)):
     session_id = data.session_id
+    
+    # NEW: Try to recover session from database if not in memory
     if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
+        recovered_session = recover_session_from_database(session_id, db_session)
+        if recovered_session:
+            sessions[session_id] = recovered_session
+            # Flag this session as recovered from restart for analysis
+            flag_session_as_recovered(session_id, db_session)
+            print(f"Session {session_id} recovered from database for rating and flagged")
+        else:
+            raise HTTPException(status_code=404, detail="Session not found")
+    
     session = sessions[session_id]
 
     actual_decision_time = data.decision_time_seconds
@@ -998,55 +1221,17 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
     elapsed_minutes = elapsed_seconds / 60
     forced_completion = elapsed_minutes >= 20
     
+    # NEW: Always save rating data incrementally after each submission
+    update_session_after_rating(session, db_session, is_final=False)
+    
     study_over = False
     if forced_completion:  # Study only ends on 20-minute timer, not on confidence selection
         session["ai_detected_final"] = (data.confidence == 1.0)
         session["final_decision_time_seconds_ddm"] = actual_decision_time
         
-        # Check if consent was accepted by looking for consent_agree_clicked in UI events
-        ui_events = session.get("ui_event_log", [])
-        consent_accepted = any(event.get("event") == "consent_agree_clicked" for event in ui_events)
-        
-        # Extract current turn's enhanced timing data from the most recent rating
-        current_rating = session["intermediate_ddm_confidence_ratings"][-1] if session["intermediate_ddm_confidence_ratings"] else {}
-        current_reading_time = current_rating.get("reading_time_seconds")
-        current_active_time = current_rating.get("active_decision_time_seconds") 
-        current_slider_log = current_rating.get("slider_interaction_log")
-        
-        # --- SAVE TO DATABASE ---
-        db_study_session = db.StudySession(
-            id=session["session_id"],
-            user_id=session["user_id"],
-            start_time=session["start_time"],
-            chosen_persona=session["chosen_persona_key"],
-            domain=session["assigned_domain"],
-            condition=session["experimental_condition"],
-            user_profile_survey=json.dumps(session["initial_user_profile_survey"]),
-            ai_detected_final=session["ai_detected_final"],
-            ddm_confidence_ratings=json.dumps(session["intermediate_ddm_confidence_ratings"]),
-            conversation_log=json.dumps(session["conversation_log"]),
-            initial_tactic_analysis=session["initial_tactic_analysis"]["full_analysis"],
-            tactic_selection_log=json.dumps(session["tactic_selection_log"]),
-            ai_researcher_notes=json.dumps(session["ai_researcher_notes_log"]),
-            feels_off_comments=json.dumps(session["feels_off_data"]),
-            final_decision_time=session["final_decision_time_seconds_ddm"],
-            ui_event_log=json.dumps(ui_events),
-            consent_accepted=consent_accepted,
-            total_study_time_minutes=elapsed_minutes,
-            forced_completion=forced_completion,
-            # NEW: Pure DDM columns
-            pure_ddm_decision=session.get("pure_ddm_decision"),
-            pure_ddm_timestamp=session.get("pure_ddm_timestamp"),
-            pure_ddm_turn_number=session.get("pure_ddm_turn_number"),
-            pure_ddm_decision_time_seconds=session.get("pure_ddm_decision_time_seconds"),
-            # NEW: Enhanced timing columns from current turn
-            reading_time_seconds=current_reading_time,
-            active_decision_time_seconds=current_active_time,
-            slider_interaction_log=json.dumps(current_slider_log) if current_slider_log else None
-        )
-        db_session.add(db_study_session)
-        db_session.commit()
-        print(f"Session {session_id} saved to database.")
+        # NEW: Final save with completion status
+        update_session_after_rating(session, db_session, is_final=True)
+        print(f"Session {session_id} completed and saved to database.")
         
         # Clean up the in-memory session
         del sessions[session_id]
@@ -1066,10 +1251,20 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
     }
 
 @app.post("/submit_comment")
-async def submit_comment(data: CommentRequest):
+async def submit_comment(data: CommentRequest, db_session: Session = Depends(get_db)):
     session_id = data.session_id
+    
+    # NEW: Try to recover session from database if not in memory
     if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
+        recovered_session = recover_session_from_database(session_id, db_session)
+        if recovered_session:
+            sessions[session_id] = recovered_session
+            # Flag this session as recovered from restart for analysis
+            flag_session_as_recovered(session_id, db_session)
+            print(f"Session {session_id} recovered from database for comment and flagged")
+        else:
+            raise HTTPException(status_code=404, detail="Session not found")
+    
     session = sessions[session_id]
 
     # Determine turn number, which is null for final, pre-debrief feedback
