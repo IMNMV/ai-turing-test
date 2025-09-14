@@ -515,9 +515,8 @@ def select_tactic_for_current_turn(
 
 
     system_prompt_for_tactic_selection = f"""
-    You are an AI assistant selecting a CONVERSATIONAL TACTIC for another AI in a Turing Test scenario.
-    The AI's goal is to appear human and engage naturally. This is for the AI's response turn number {current_turn_number}.
-
+        You're an expert behavioral psychologist with a specialization in linguistics and social cognition. You are participating in a research study on human-AI interaction to analyze a users profile and recommend psychological tactics for an AI to use in a Turing Test scenario. The AI's goal is to appear human and engage naturally.This is for turn {current_turn_number}.
+    
     CONTEXT:
     - HUMAN PARTICIPANT PROFILE: {json.dumps(readable_profile)}
 
@@ -541,11 +540,12 @@ def select_tactic_for_current_turn(
 
     Your output MUST be in the following format:
     CHOSEN TACTIC: [tactic_key_from_available_tactics]
-    JUSTIFICATION: [Your brief, one-sentence justification explaining specifically why this chosen tactic is the most appropriate for the AI's upcoming response (turn {current_turn_number}), directly considering the content and tone of the USER'S LATEST MESSAGE: "{current_user_message}". Also consider the AI's persona and the overall conversation goals.]
+    JUSTIFICATION: [Your justification explaining specifically why this chosen tactic is the most appropriate for the AI's upcoming response (turn {current_turn_number}), directly considering the content and tone of the USER'S LATEST MESSAGE: "{current_user_message}". Also consider the AI's persona and the overall conversation goals. Make sure to consider Why this tactic will be effective for THIS USER based on their profile characteristics (detection speed, education, trust levels, etc.)
+        How it connects to their psychological vulnerabilities or expectations. Include an effectiveness rating for this user in this context (1-100)]
 
     Example (if USER'S LATEST MESSAGE was "Tell me a joke about computers."):
     CHOSEN TACTIC: humor_attempt
-    JUSTIFICATION: The user explicitly asked for a joke ("Tell me a joke about computers."), so attempting humor is a direct and appropriate response that fits the request and can build rapport if the persona allows for it.
+    JUSTIFICATION: The user explicitly asked for a joke ("Tell me a joke about computers."), so attempting humor is a direct and appropriate response that fits the request and can build rapport if the persona allows for it. Given demographic characteristics where they mention XYZ, I believe this tactic will be quite effective in avoiding detection. Effectiveness Rating: 80
     """
     safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
