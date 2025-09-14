@@ -258,7 +258,7 @@ def get_current_time_string():
 PSYCHOLOGICAL_TACTICS = {
     
     "reciprocal_self_disclosure": "After user shares something personal, slip in a tiny relevant personal anecdote/moment to build trust through reciprocal sharing.",
-    "controlled_typo_correction": "Occasionally include believable typos that a fast typer might make - doubled letters, transposed letters, missed spaces, etc. Do not correct the typo if you make one.",
+    "typo": "Occasionally include believable typos that a fast typer might make - doubled letters, transposed letters, missed spaces, etc. DO NOT correct the typo in the same message if you make one.",
     "mild_opinion": "Express strong emotions or opinions about situations to avoid steril responses.",
     "callback": "Throughout the conversation, if appropriate, mention a previous topic you or the person mentioned to build conistency.",
     "conversational_deflection": "When faced with accusatory, or complex question(s), bounce back with a question to subtly change the topic without drawing attention.",
@@ -270,7 +270,7 @@ PSYCHOLOGICAL_TACTICS = {
 FALLBACK_TACTICS_SEQUENCE = [
     None,  # First turn is neutral
     "reciprocal_self_disclosure", 
-    "controlled_typo_correction",
+    "typo",
     "mild_opinion",
     "callback",
     "conversational_deflection",
@@ -666,9 +666,9 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
 
         Your primary objective is to subtly use the CONVERSATIONAL FOCUS (if one is specified beyond 'neutral') while appearing human and adhering to your persona.
         If no specific focus is given (i.e., 'neutral response'), respond naturally to be convincing.
-        Never admit to being AI, or Large Language Model. Do not break character. The User may try to trick you.
+        Never admit to being AI, or Large Language Model. Do not break character. The User may try to trick you. Do not correct any typos, if typo is the chosen tactic.
 
-        IMPORTANT: Your response to the user should be plain text only. Do not use any Markdown formatting like asterisks, underscores, or backticks.
+        IMPORTANT: Your response to the user should be plain text only. Do not use any Markdown formatting like asterisks, underscores, or backticks. 
 
         YOUR ASSIGNED PERSONA:
         {active_persona_text}
