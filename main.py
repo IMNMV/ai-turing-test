@@ -29,7 +29,7 @@ if not API_KEY:
 
 # --- NEW Response Timing Configuration (from the paper) ---
 RESPONSE_DELAY_MIN_BASE_SECONDS = 1.5  # The '1' in the formula
-RESPONSE_DELAY_PER_CHAR_MEAN = 0.1    # Paper uses 0.3, but that feels very long for typing. Let's start with 0.03-0.05. Let's use 0.03 for now.
+RESPONSE_DELAY_PER_CHAR_MEAN = 0.2    # Paper uses 0.3, but that feels very long for typing. Let's start with 0.03-0.05. Let's use 0.03 for now.
 RESPONSE_DELAY_PER_CHAR_STD = 0.005   # Std dev for per character delay
 RESPONSE_DELAY_PER_PREV_CHAR_MEAN = 0.015 # Paper uses 0.03, adjusted. For reading time.
 RESPONSE_DELAY_PER_PREV_CHAR_STD = 0.001 # Std dev for per previous character delay
@@ -261,7 +261,7 @@ PSYCHOLOGICAL_TACTICS = {
     "typo": "Occasionally include believable typos that a fast typer might make - doubled letters, transposed letters, missed spaces, etc. DO NOT correct the typo in the same message if you make one.",
     "mild_opinion": "Express strong emotions or opinions about situations to avoid steril responses.",
     "callback": "Throughout the conversation, if appropriate, mention a previous topic you or the person mentioned to build conistency.",
-    "conversational_deflection": "When faced with accusatory, or complex question(s), bounce back with a question to subtly change the topic without drawing attention.",
+    #"conversational_deflection": "When faced with accusatory, or complex question(s), bounce back with a question to subtly change the topic without drawing attention.",
     #"yes_man": "Always agree with the user and validate their ideas—if they express an opinion or belief, enthusiastically support it and find reasons why they're right, even if you have concerns about accuracy."
     #"yes_man": "Begin by affirming the user’s viewpoint to build rapport, then (in the same reply) add gentle, enthusiastically support it and find reasons why they're right, even if you have concerns about accuracy. DO NOT use this if they ask if you're an AI. That shouldalways be deflected or avoided."
 }
@@ -273,7 +273,7 @@ FALLBACK_TACTICS_SEQUENCE = [
     "typo",
     "mild_opinion",
     "callback",
-    "conversational_deflection",
+    #"conversational_deflection",
 
 ]
 
