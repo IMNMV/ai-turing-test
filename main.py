@@ -338,17 +338,17 @@ def initialize_gemini_models_and_module():
     )
     
     # Initialize the primary, more powerful model
-    primary_model = genai.GenerativeModel('gemini-2.5-pro') 
+    primary_model = genai.GenerativeModel('gemini-2.5-flash') 
     
     # Initialize the fallback model  
-    fallback_model = genai.GenerativeModel('gemini-2.5-flash')
+    fallback_model = genai.GenerativeModel('gemini-2.5-flash-lite')
     
     return primary_model, fallback_model, genai
 
 try:
     GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GENAI_MODULE = initialize_gemini_models_and_module()
     GEMINI_MODEL = GEMINI_PRO_MODEL # for legacy checks
-    print("Primary (Gemini 2.5 Pro) and Fallback (Gemini 2.5 Flash) models initialized.")
+    print("Primary (Gemini 2.5 Flash) and Fallback (Gemini 2.5 Flash Lite) models initialized.")
 except Exception as e:
     print(f"FATAL: Could not initialize Gemini Models: {e}")
     GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GENAI_MODULE, GEMINI_MODEL = None, None, None, None
