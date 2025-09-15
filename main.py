@@ -1225,7 +1225,19 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
     update_session_after_rating(session, db_session, is_final=False)
     
     study_over = False
-    if forced_completion:  # Study only ends on 20-minute timer, not on confidence selection
+    if forced_completion:  # 20 minutes elapsed
+        # ENFORCE: Study can only end with exactly 0 or 1
+        if data.confidence != 0.0 and data.confidence != 1.0:
+            # Timer expired but invalid final choice - study CONTINUES
+            print(f"Session {session_id}: Timer expired but non-binary choice ({data.confidence}) submitted. Study continues.")
+            return {
+                "message": "Rating submitted.",
+                "study_over": False,  # Study keeps going
+                "ai_detected": None,
+                "session_data_summary": None
+            }
+        
+        # Valid 0 or 1 submitted - NOW the study can end
         session["ai_detected_final"] = (data.confidence == 1.0)
         session["final_decision_time_seconds_ddm"] = actual_decision_time
         
