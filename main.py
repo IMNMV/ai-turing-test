@@ -29,7 +29,7 @@ if not API_KEY:
 
 # --- NEW Response Timing Configuration (from the paper) ---
 RESPONSE_DELAY_MIN_BASE_SECONDS = 1.5  # The '1' in the formula
-RESPONSE_DELAY_PER_CHAR_MEAN = 0.3    # Paper uses 0.3, but that feels very long for typing. Let's start with 0.03-0.05. Let's use 0.03 for now.
+RESPONSE_DELAY_PER_CHAR_MEAN = 0.1    # Paper uses 0.3, but that feels very long for typing. Let's start with 0.03-0.05. Let's use 0.03 for now.
 RESPONSE_DELAY_PER_CHAR_STD = 0.005   # Std dev for per character delay
 RESPONSE_DELAY_PER_PREV_CHAR_MEAN = 0.015 # Paper uses 0.03, adjusted. For reading time.
 RESPONSE_DELAY_PER_PREV_CHAR_STD = 0.001 # Std dev for per previous character delay
