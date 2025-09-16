@@ -342,7 +342,7 @@ def initialize_gemini_models_and_module():
     primary_model = genai.GenerativeModel('gemini-2.5-flash') 
     
     # Initialize the fallback model  
-    fallback_model = genai.GenerativeModel('gemini-2.5-flash-lite')
+    fallback_model = genai.GenerativeModel('gemini-2.5-flash')
     
     return primary_model, fallback_model, genai
 
@@ -701,7 +701,23 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
         # --- ATTEMPT 1: PRIMARY MODEL (PRO) ---
         # print("Attempting to generate response with GEMINI_PRO_MODEL...")
         response = GEMINI_PRO_MODEL.generate_content(contents=system_prompt, safety_settings=safety_settings)
-        full_text = response.text
+        
+        # Robust text extraction to handle multi-part responses
+        try:
+            full_text = response.text
+        except ValueError as text_error:
+            # Handle multi-part responses that can't use .text accessor
+            print(f"Primary model returned multi-part response, extracting text manually: {text_error}")
+            full_text = ""
+            if hasattr(response, 'candidates') and response.candidates:
+                for candidate in response.candidates:
+                    if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                        for part in candidate.content.parts:
+                            if hasattr(part, 'text') and part.text:
+                                full_text += part.text
+            
+            if not full_text:
+                raise ValueError("Could not extract any text from multi-part response")
 
         if "RESEARCHER_NOTES:" in full_text:
             user_text, researcher_notes_section = full_text.split("RESEARCHER_NOTES:", 1)
