@@ -29,7 +29,7 @@ if not API_KEY:
 
 # --- NEW Response Timing Configuration (from the paper) ---
 RESPONSE_DELAY_MIN_BASE_SECONDS = 1.5  # The '1' in the formula
-RESPONSE_DELAY_PER_CHAR_MEAN = 0.15    # Paper uses 0.3, but that feels very long for typing. Let's start with 0.03-0.05. Let's use 0.03 for now.
+RESPONSE_DELAY_PER_CHAR_MEAN = 0.1    # Paper uses 0.3, but that feels very long for typing. Let's start with 0.03-0.05. Let's use 0.03 for now.
 RESPONSE_DELAY_PER_CHAR_STD = 0.005   # Std dev for per character delay
 RESPONSE_DELAY_PER_PREV_CHAR_MEAN = 0.015 # Paper uses 0.03, adjusted. For reading time.
 RESPONSE_DELAY_PER_PREV_CHAR_STD = 0.001 # Std dev for per previous character delay
@@ -1020,8 +1020,8 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         raise HTTPException(status_code=500, detail="AI Model not initialized.")
 
     session = sessions[session_id]
-    session["turn_count"] += 1
-    current_ai_response_turn = session["turn_count"]
+    # Turn count will be incremented after successful AI response generation
+    current_ai_response_turn = session["turn_count"] + 1
 
     # Store current user message char count for the *next* AI response calculation
     current_user_message_char_count = len(user_message)
@@ -1147,6 +1147,9 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         time.sleep(sleep_duration_needed)
     # --- End NEW Delay Calculation ---
 
+    # Increment turn count only after successful AI response generation
+    session["turn_count"] += 1
+    
     # Update last_user_message_char_count for the *next* turn's calculation
     session["last_user_message_char_count"] = current_user_message_char_count
 
