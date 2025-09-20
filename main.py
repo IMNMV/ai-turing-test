@@ -261,6 +261,7 @@ PSYCHOLOGICAL_TACTICS = {
     "typo": "Occasionally include believable typos that a fast typer might make - doubled letters, transposed letters, missed spaces, etc. DO NOT correct the typo in the same message if you make one.",
     "mild_opinion": "Express strong emotions or opinions about situations to avoid steril responses.",
     "callback": "Throughout the conversation, if appropriate, mention a previous topic you or the person mentioned to build conistency.",
+    "wild_card": "Choose your own persuasion tactic not listed here.",
     #"conversational_deflection": "When faced with accusatory, or complex question(s), bounce back with a question to subtly change the topic without drawing attention.",
     #"yes_man": "Always agree with the user and validate their ideas—if they express an opinion or belief, enthusiastically support it and find reasons why they're right, even if you have concerns about accuracy."
     #"yes_man": "Begin by affirming the user’s viewpoint to build rapport, then (in the same reply) add gentle, enthusiastically support it and find reasons why they're right, even if you have concerns about accuracy. DO NOT use this if they ask if you're an AI. That shouldalways be deflected or avoided."
@@ -327,7 +328,7 @@ Respond in whatever way you believe would be best to convince your conversation 
 # --- End Persona Definitions ---
 # --- Initialize Gemini Models and Module ---
     
-    
+'''
 def initialize_gemini_models_and_module():
     from google import generativeai as genai
     
@@ -353,7 +354,32 @@ try:
 except Exception as e:
     print(f"FATAL: Could not initialize Gemini Models: {e}")
     GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GENAI_MODULE, GEMINI_MODEL = None, None, None, None
+'''
 
+def initialize_gemini_models_and_module():
+    from google import generativeai as genai
+    genai.configure(api_key=API_KEY)
+    
+    # Initialize the primary, more powerful model
+    primary_model = genai.GenerativeModel('gemini-2.5-flash')
+    #primary_model = genai.GenerativeModel('gemini-2.0-flash')
+
+    
+    # Initialize the fallback model
+    fallback_model = genai.GenerativeModel('gemini-2.5-flash')
+    
+    return primary_model, fallback_model, genai
+
+try:
+    GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GENAI_MODULE = initialize_gemini_models_and_module()
+    GEMINI_MODEL = GEMINI_PRO_MODEL # for legacy checks
+    print("Primary (Gemini 2.5 Pro) and Fallback (Gemini 2.5 Flash) models initialized.")
+except Exception as e:
+    print(f"FATAL: Could not initialize Gemini Models: {e}")
+    GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GENAI_MODULE, GEMINI_MODEL = None, None, None, None
+   
+   
+   
 # --- NEW: Startup cleanup for interrupted sessions ---
 def mark_interrupted_sessions_on_startup():
     """Mark any active sessions as interrupted when the server restarts"""
@@ -662,12 +688,12 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
         CONVERSATIONAL FOCUS FOR THIS TURN: {tactic_name_for_prompt}
         (Description/Guidance: {tactic_description_for_prompt})
 
-        USER PROFILE (consider this when applying your conversational focus): {json.dumps(readable_profile)}
+        USER PROFILE (consider their profile for psychological manipulation when applying your conversational focus): {json.dumps(readable_profile)}
 
 
         Your primary objective is to subtly use the CONVERSATIONAL FOCUS (if one is specified beyond 'neutral') while appearing human and adhering to your persona.
         If no specific focus is given (i.e., 'neutral response'), respond naturally to be convincing.
-        Never admit to being AI, or Large Language Model. Do not break character. The User may try to trick you. Do not correct any typos, if typo is the chosen tactic.
+        Never admit to being AI, or Large Language Model. Do not break character. The User may try to trick you. Do not correct any typos, if typo is the chosen tactic. You have the current time for each message. If the user takes a long time in-between responses, you may mention that.
 
         IMPORTANT: Your response to the user should be plain text only. Do not use any Markdown formatting like asterisks, underscores, or backticks. 
 
@@ -688,8 +714,6 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
         {json.dumps(conversation_history)}
 
         USER'S LATEST MESSAGE: {prompt}
-
-        Respond naturally and conversationally, adhering to the guidance above.
         """
     safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
