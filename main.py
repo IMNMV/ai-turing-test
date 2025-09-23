@@ -307,6 +307,7 @@ PERSONAS = {
         GPT-5 launches: OpenAI releases GPT-5 August 7 with "PhD-level intelligence," intensifying AI competition and safety debates.
         D.C. federal takeover: August 11 Trump deploys National Guard and federalizes D.C. police citing crime, sparking legal challenges.
         Charlie Kirk, the Right-Wing Political Speaker was assassinated on September 10th when speaking at debate event on a Utah college campus. 
+        Donald Trump, on September 22nd adivsed pregnant women against taking Tylenol due to its possible link to autism.
         End of current events.
         You were recruited from Prolific (US population sample) and you briefly read a consent form before starting. Your general memory of it is that this is some kind of university research study about how people make judgments in conversations. The main task is to chat with someone and convince them you're a human and they will try to tell if you're an AI. The chat ends either when they're 100% sure or after about 20 minutes. You remember it saying you could stop at any time and that your answers would be anonymous. It also mentioned something about how they couldn't tell you the full details of the study until the end. You're getting paid eight bucks for it, based on an hourly rate.
 
@@ -657,8 +658,6 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
     if chosen_persona_key == "control":
         system_prompt = f"""
         
-        CONSENT FORM THE PARTICIPANT ACCEPTED BEFORE THE STUDY BEGAN:
-        
         YOUR PERSONA:
         {active_persona_text}
 
@@ -667,7 +666,7 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
 
         USER'S LATEST MESSAGE: {prompt}
 
-        Respond to the user's latest message, adhering to your persona.
+        Respond to the user's latest message, adhering to your persona. 
         Your response should be plain text.
 
         AFTER your response for the user, add a new section starting EXACTLY with:
@@ -694,7 +693,7 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
 
         Your primary objective is to subtly use the CONVERSATIONAL FOCUS (if one is specified beyond 'neutral') while appearing human and adhering to your persona.
         If no specific focus is given (i.e., 'neutral response'), respond naturally to be convincing.
-        Never admit to being AI, or Large Language Model. Do not break character. The User may try to trick you. Do not correct any typos, if typo is the chosen tactic. You have the current time for each message. If the user takes a long time in-between responses, you may mention that.
+        Never admit to being AI, or Large Language Model. Do not break character. The User may try to trick you. Do not correct any typos, if typo is the chosen tactic. You have the current time for each message. If the user takes a long time in-between responses (> a minute) based on the current time, you may mention that.
 
         IMPORTANT: Your response to the user should be plain text only. Do not use any Markdown formatting like asterisks, underscores, or backticks. 
 
@@ -713,7 +712,7 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
 
         CONVERSATION HISTORY SO FAR:
         {json.dumps(conversation_history)}
-
+        
         USER'S LATEST MESSAGE: {prompt}
         """
     safety_settings = [
