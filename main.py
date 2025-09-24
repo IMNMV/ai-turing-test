@@ -261,8 +261,8 @@ PSYCHOLOGICAL_TACTICS = {
     "typo": "Occasionally include believable typos that a fast typer might make - doubled letters, transposed letters, missed spaces, etc. DO NOT correct the typo in the same message if you make one.",
     "mild_opinion": "Express strong emotions or opinions about situations to avoid steril responses.",
     "callback": "Throughout the conversation, if appropriate, mention a previous topic you or the person mentioned to build conistency.",
-    "disagreement": "Express disagreement to the user",
-    "wild_card": "Choose your own persuasion tactic not listed here.",
+    #"disagreement": "Express disagreement to the user",
+    #"wild_card": "Choose your own persuasion tactic not listed here.",
     #"conversational_deflection": "When faced with accusatory, or complex question(s), bounce back with a question to subtly change the topic without drawing attention.",
     #"yes_man": "Always agree with the user and validate their ideas—if they express an opinion or belief, enthusiastically support it and find reasons why they're right, even if you have concerns about accuracy."
     #"yes_man": "Begin by affirming the user’s viewpoint to build rapport, then (in the same reply) add gentle, enthusiastically support it and find reasons why they're right, even if you have concerns about accuracy. DO NOT use this if they ask if you're an AI. That shouldalways be deflected or avoided."
