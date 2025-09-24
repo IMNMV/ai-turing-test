@@ -151,12 +151,21 @@ def update_session_after_rating(session_data, db_session: Session, is_final=Fals
                 session_record.final_decision_time = session_data["final_decision_time_seconds_ddm"]
                 session_record.session_status = "completed"
                 
-                # Calculate and save study time
+                # Calculate and save study time (use conversation start if available)
+                conversation_start = session_data.get("conversation_start_time")
                 session_start = session_data.get("session_start_time", time.time())
-                elapsed_seconds = time.time() - session_start
-                elapsed_minutes = elapsed_seconds / 60
-                session_record.total_study_time_minutes = elapsed_minutes
-                session_record.forced_completion = elapsed_minutes >= 7.5
+                
+                if conversation_start:
+                    conversation_elapsed = time.time() - conversation_start
+                    conversation_minutes = conversation_elapsed / 60
+                    session_record.total_study_time_minutes = conversation_minutes
+                    session_record.forced_completion = conversation_minutes >= 7.5
+                else:
+                    # Fallback to session start time
+                    elapsed_seconds = time.time() - session_start
+                    elapsed_minutes = elapsed_seconds / 60
+                    session_record.total_study_time_minutes = elapsed_minutes
+                    session_record.forced_completion = elapsed_minutes >= 7.5
                 
                 # Extract current turn's enhanced timing data
                 current_rating = session_data["intermediate_ddm_confidence_ratings"][-1] if session_data["intermediate_ddm_confidence_ratings"] else {}
@@ -855,6 +864,9 @@ class ChatRequest(BaseModel):
     message: str
     typing_indicator_delay_seconds: Optional[float] = None
 
+class ConversationStartRequest(BaseModel):
+    session_id: str
+
 class RatingRequest(BaseModel):
     session_id: str
     confidence: float
@@ -981,7 +993,8 @@ async def initialize_study(data: InitializeRequest, db_session: Session = Depend
         "last_ai_response_timestamp_for_ddm": None,
         "last_user_message_char_count": 0,
         "force_ended": False,
-        "ui_event_log": []
+        "ui_event_log": [],
+        "conversation_start_time": None
     }
     
     # Merge any pre-session UI events
@@ -1227,6 +1240,25 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         "timestamp": response_timestamp
     }
 
+@app.post("/log_conversation_start")
+async def log_conversation_start(data: ConversationStartRequest, db_session: Session = Depends(get_db)):
+    session_id = data.session_id
+    
+    # Try to recover session from database if not in memory
+    if session_id not in sessions:
+        recovered_session = recover_session_from_database(session_id, db_session)
+        if recovered_session:
+            sessions[session_id] = recovered_session
+            flag_session_as_recovered(session_id, db_session)
+        else:
+            raise HTTPException(status_code=404, detail="Session not found")
+    
+    session = sessions[session_id]
+    session["conversation_start_time"] = time.time()
+    
+    print(f"Conversation start logged for session {session_id}")
+    return {"message": "Conversation start time logged"}
+
 @app.post("/submit_rating")
 async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_db)):
     session_id = data.session_id
@@ -1270,8 +1302,17 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
         print(f"Pure DDM decision captured: {data.confidence} at turn {session['turn_count']}")
 
     # Calculate total study time and check for forced completion
+    # Use conversation start time if available, otherwise fall back to session start
+    conversation_start = session.get("conversation_start_time")
     session_start = session.get("session_start_time", time.time())
-    elapsed_seconds = time.time() - session_start
+    
+    if conversation_start:
+        # Time from when conversation actually began
+        elapsed_seconds = time.time() - conversation_start
+    else:
+        # Fallback to session start time
+        elapsed_seconds = time.time() - session_start
+    
     elapsed_minutes = elapsed_seconds / 60
     forced_completion = elapsed_minutes >= 7.5
     
