@@ -38,7 +38,7 @@ RESPONSE_DELAY_THINKING_SCALE = 0.4  # Gamma distribution scale parameter (theta
 
 
 # --- DEBUG SWITCH FOR PERSONA ---
-#DEBUG_FORCE_PERSONA = None # For randomization 
+#DEBUG_FORCE_PERSONA = None # For randomization
 DEBUG_FORCE_PERSONA = "custom_extrovert"
 #DEBUG_FORCE_PERSONA = "control"
 # ---------------------------------
@@ -210,7 +210,7 @@ def recover_session_from_database(session_id: str, db_session: Session):
             "session_id": session_record.id,
             "user_id": session_record.user_id,
             "participant_id": None,  # Will be set if available
-            "prolific_pid": None,    # Will be set if available 
+            "prolific_pid": None,    # Will be set if available
             "start_time": session_record.start_time,
             "session_start_time": session_record.start_time.timestamp(),
             "initial_user_profile_survey": json.loads(session_record.user_profile_survey) if session_record.user_profile_survey else {},
@@ -271,7 +271,7 @@ PSYCHOLOGICAL_TACTICS = {
 #is this making it so these come in a fixed order?
 FALLBACK_TACTICS_SEQUENCE = [
     None,  # First turn is neutral
-    "reciprocal_self_disclosure", 
+    "reciprocal_self_disclosure",
     "typo",
     "mild_opinion",
     "callback",
@@ -640,7 +640,7 @@ def select_tactic_for_current_turn(
         return chosen_tactic, justification
 
 def generate_ai_response(model, prompt:str, technique:Optional[str], user_profile:Dict, conversation_history:List[Dict], chosen_persona_key: str):
-    if not GEMINI_PRO_MODEL or not GEMINI_FLASH_MODEL: 
+    if not GEMINI_PRO_MODEL or not GEMINI_FLASH_MODEL:
         return "Error: AI models are not initialized.", "No researcher notes due to model init error."
 
     readable_profile = convert_profile_to_readable(user_profile)
@@ -849,6 +849,7 @@ class InitializeRequest(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    typing_indicator_delay_seconds: Optional[float] = None
 
 class RatingRequest(BaseModel):
     session_id: str
@@ -905,7 +906,7 @@ async def initialize_study(data: InitializeRequest, db_session: Session = Depend
         "ai_models_used": sanitized_models,
         "self_detection_speed": data.self_detection_speed,
         "others_detection_speed": data.others_detection_speed,
-        "ai_capabilities_rating": data.ai_capabilities_rating,  
+        "ai_capabilities_rating": data.ai_capabilities_rating,
         "trust_in_ai": data.trust_in_ai,
         "age": data.age,
         "gender": html.escape(str(data.gender)),
@@ -1198,7 +1199,12 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         "user": user_message,
         "assistant": ai_response_text,
         "tactic_used": tactic_key_for_this_turn,
-        "tactic_selection_justification": tactic_sel_justification
+        "tactic_selection_justification": tactic_sel_justification,
+        "timing": {
+            "api_call_time_seconds": time_spent_on_actual_ai_calls,
+            "sleep_duration_seconds": sleep_duration_needed,
+            "typing_indicator_delay_seconds": data.typing_indicator_delay_seconds
+        }
     })
     session["ai_researcher_notes_log"].append({
         "turn": current_ai_response_turn,
