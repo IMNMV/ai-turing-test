@@ -1197,6 +1197,18 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
 
     # Calculate how much *additional* sleep is needed
     sleep_duration_needed = target_visible_response_time_paper_model - time_spent_on_actual_ai_calls
+    
+    # Apply scaled minimum delay to fix negative sleep durations while preserving length-response relationship
+    min_delay_base = 2.0  # Base minimum delay in seconds
+    min_delay_per_char = 0.05  # Additional delay per character of user message
+    user_message_length = len(user_message)
+    scaled_minimum_delay = min_delay_base + (user_message_length * min_delay_per_char)
+    
+    if sleep_duration_needed < scaled_minimum_delay:
+        original_sleep = sleep_duration_needed
+        sleep_duration_needed = scaled_minimum_delay
+        print(f"--- DEBUG: Applied scaled minimum delay: {original_sleep:.3f}s -> {sleep_duration_needed:.3f}s (msg_len: {user_message_length}) ---")
+    
     print(f"--- DEBUG: Time spent on actual AI calls: {time_spent_on_actual_ai_calls:.3f}s ---")
     print(f"--- DEBUG: Sleep duration needed (Paper Model): {sleep_duration_needed:.3f}s ---")
 
