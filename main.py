@@ -156,7 +156,7 @@ def update_session_after_rating(session_data, db_session: Session, is_final=Fals
                 elapsed_seconds = time.time() - session_start
                 elapsed_minutes = elapsed_seconds / 60
                 session_record.total_study_time_minutes = elapsed_minutes
-                session_record.forced_completion = elapsed_minutes >= 20
+                session_record.forced_completion = elapsed_minutes >= 7.5
                 
                 # Extract current turn's enhanced timing data
                 current_rating = session_data["intermediate_ddm_confidence_ratings"][-1] if session_data["intermediate_ddm_confidence_ratings"] else {}
@@ -1269,7 +1269,7 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
     session_start = session.get("session_start_time", time.time())
     elapsed_seconds = time.time() - session_start
     elapsed_minutes = elapsed_seconds / 60
-    forced_completion = elapsed_minutes >= 20
+    forced_completion = elapsed_minutes >= 7.5
     
     # NEW: Always save rating data incrementally after each submission
     update_session_after_rating(session, db_session, is_final=False)
