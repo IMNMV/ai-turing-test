@@ -1198,10 +1198,10 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
     # Calculate how much *additional* sleep is needed
     sleep_duration_needed = target_visible_response_time_paper_model - time_spent_on_actual_ai_calls
     
-    # Apply flat 5-second minimum delay for first message only
-    if current_ai_response_turn == 1 and sleep_duration_needed < 5.0:
+    # Apply flat 7-second minimum delay for first message only
+    if current_ai_response_turn == 1 and sleep_duration_needed < 7.0:
         original_sleep = sleep_duration_needed
-        sleep_duration_needed = 5.0
+        sleep_duration_needed = 7.0
         print(f"--- DEBUG: Applied first message minimum delay: {original_sleep:.3f}s -> {sleep_duration_needed:.3f}s (Turn 1) ---")
     
     print(f"--- DEBUG: Time spent on actual AI calls: {time_spent_on_actual_ai_calls:.3f}s ---")
