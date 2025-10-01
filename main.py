@@ -377,12 +377,12 @@ def initialize_gemini_models_and_module():
     genai.configure(api_key=API_KEY)
     
     # Initialize the primary, more powerful model
-    primary_model = genai.GenerativeModel('gemini-live-2.5-flash')
+    primary_model = genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
     #primary_model = genai.GenerativeModel('gemini-2.0-flash')
 
     
     # Initialize the fallback model
-    fallback_model = genai.GenerativeModel('gemini-live-2.5-flash')
+    fallback_model = genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
     
     return primary_model, fallback_model, genai
 
