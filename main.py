@@ -864,9 +864,15 @@ class ChatRequest(BaseModel):
     session_id: str
     message: str
     typing_indicator_delay_seconds: Optional[float] = None
+    network_delay_seconds: Optional[float] = None
 
 class ConversationStartRequest(BaseModel):
     session_id: str
+
+class NetworkDelayUpdateRequest(BaseModel):
+    session_id: str
+    turn: int
+    network_delay_seconds: float
 
 class RatingRequest(BaseModel):
     session_id: str
@@ -1228,7 +1234,8 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         "timing": {
             "api_call_time_seconds": time_spent_on_actual_ai_calls,
             "sleep_duration_seconds": sleep_duration_needed,
-            "typing_indicator_delay_seconds": data.typing_indicator_delay_seconds
+            "typing_indicator_delay_seconds": data.typing_indicator_delay_seconds,
+            "network_delay_seconds": None  # Will be updated by separate network delay endpoint
         }
     })
     session["ai_researcher_notes_log"].append({
@@ -1266,6 +1273,35 @@ async def log_conversation_start(data: ConversationStartRequest, db_session: Ses
     
     print(f"Conversation start logged for session {session_id}")
     return {"message": "Conversation start time logged"}
+
+@app.post("/update_network_delay")
+async def update_network_delay(data: NetworkDelayUpdateRequest, db_session: Session = Depends(get_db)):
+    session_id = data.session_id
+    
+    # Try to recover session from database if not in memory
+    if session_id not in sessions:
+        recovered_session = recover_session_from_database(session_id, db_session)
+        if recovered_session:
+            sessions[session_id] = recovered_session
+            flag_session_as_recovered(session_id, db_session)
+        else:
+            raise HTTPException(status_code=404, detail="Session not found")
+    
+    session = sessions[session_id]
+    
+    # Find the conversation turn and update its network delay
+    for turn_data in session["conversation_log"]:
+        if turn_data["turn"] == data.turn:
+            if "timing" in turn_data:
+                turn_data["timing"]["network_delay_seconds"] = data.network_delay_seconds
+                print(f"Updated network delay for session {session_id}, turn {data.turn}: {data.network_delay_seconds}s")
+                
+                # Update the database immediately
+                update_session_after_message(session, db_session)
+                
+                return {"message": "Network delay updated successfully"}
+    
+    raise HTTPException(status_code=404, detail=f"Turn {data.turn} not found in session {session_id}")
 
 @app.post("/submit_rating")
 async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_db)):
