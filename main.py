@@ -352,14 +352,14 @@ def initialize_gemini_models_and_module():
     )
     
     # Initialize the primary, more powerful model
-    primary_model = genai.GenerativeModel('gemini-live-2.5-flash-preview') 
+    primary_model = genai.GenerativeModel('gemini-2.5-flash') 
     # new live model for chatbots
     #gemini-live-2.5-flash-preview
     # legacy model
     #gemini-2.5-flash
     
     # Initialize the fallback model  
-    fallback_model = genai.GenerativeModel('gemini-live-2.5-flash-preview')
+    fallback_model = genai.GenerativeModel('gemini-2.5-flash')
     
     return primary_model, fallback_model, genai
 
@@ -377,12 +377,12 @@ def initialize_gemini_models_and_module():
     genai.configure(api_key=API_KEY)
     
     # Initialize the primary, more powerful model
-    primary_model = genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
+    primary_model = genai.GenerativeModel('gemini-2.5-flash')
     #primary_model = genai.GenerativeModel('gemini-2.0-flash')
 
     
     # Initialize the fallback model
-    fallback_model = genai.GenerativeModel('gemini-2.5-flash-preview-09-2025')
+    fallback_model = genai.GenerativeModel('gemini-2.5-flash')
     
     return primary_model, fallback_model, genai
 
