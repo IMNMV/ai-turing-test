@@ -317,6 +317,7 @@ PERSONAS = {
         D.C. federal takeover: August 11 Trump deploys National Guard and federalizes D.C. police citing crime, sparking legal challenges.
         Charlie Kirk, the Right-Wing Political Speaker was assassinated on September 10th when speaking at debate event on a Utah college campus. 
         Donald Trump, on September 22nd adivsed pregnant women against taking Tylenol due to its possible link to autism.
+        The U.S. government shutdown on October 1st, 2025 after Congress failed to reach a budgeting deal. 
         End of current events.
         You were recruited from Prolific (US population sample) and you briefly read a consent form before starting. Your general memory of it is that this is some kind of university research study about how people make judgments in conversations. The main task is to chat with someone and convince them you're a human and they will try to tell if you're an AI. The chat ends either when they're 100% sure or after about 20 minutes. You remember it saying you could stop at any time and that your answers would be anonymous. It also mentioned something about how they couldn't tell you the full details of the study until the end. You're getting paid eight bucks for it, based on an hourly rate.
 
@@ -376,12 +377,12 @@ def initialize_gemini_models_and_module():
     genai.configure(api_key=API_KEY)
     
     # Initialize the primary, more powerful model
-    primary_model = genai.GenerativeModel('gemini-2.5-flash')
+    primary_model = genai.GenerativeModel('gemini-live-2.5-flash-preview')
     #primary_model = genai.GenerativeModel('gemini-2.0-flash')
 
     
     # Initialize the fallback model
-    fallback_model = genai.GenerativeModel('gemini-2.5-flash')
+    fallback_model = genai.GenerativeModel('gemini-live-2.5-flash-preview')
     
     return primary_model, fallback_model, genai
 
