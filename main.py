@@ -873,6 +873,7 @@ class NetworkDelayUpdateRequest(BaseModel):
     session_id: str
     turn: int
     network_delay_seconds: float
+    send_attempts: Optional[int] = 1
     metadata: Optional[Dict[str, Any]] = None
 
 class RatingRequest(BaseModel):
@@ -1295,17 +1296,18 @@ async def update_network_delay(data: NetworkDelayUpdateRequest, db_session: Sess
         if turn_data["turn"] == data.turn:
             if "timing" in turn_data:
                 turn_data["timing"]["network_delay_seconds"] = data.network_delay_seconds
-                
+                turn_data["timing"]["send_attempts"] = data.send_attempts
+
                 # Add network delay metadata if provided
                 if data.metadata:
                     turn_data["timing"]["network_delay_metadata"] = data.metadata
-                    print(f"Updated network delay for session {session_id}, turn {data.turn}: {data.network_delay_seconds}s with metadata: {data.metadata.get('status', 'unknown')}")
+                    print(f"Updated network delay for session {session_id}, turn {data.turn}: {data.network_delay_seconds}s, attempts: {data.send_attempts}, metadata: {data.metadata.get('status', 'unknown')}")
                 else:
-                    print(f"Updated network delay for session {session_id}, turn {data.turn}: {data.network_delay_seconds}s")
-                
+                    print(f"Updated network delay for session {session_id}, turn {data.turn}: {data.network_delay_seconds}s, attempts: {data.send_attempts}")
+
                 # Update the database immediately
                 update_session_after_message(session, db_session)
-                
+
                 return {"message": "Network delay updated successfully"}
     
     raise HTTPException(status_code=404, detail=f"Turn {data.turn} not found in session {session_id}")
