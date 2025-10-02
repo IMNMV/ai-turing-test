@@ -873,6 +873,7 @@ class NetworkDelayUpdateRequest(BaseModel):
     session_id: str
     turn: int
     network_delay_seconds: float
+    metadata: Optional[Dict[str, Any]] = None
 
 class RatingRequest(BaseModel):
     session_id: str
@@ -1294,7 +1295,13 @@ async def update_network_delay(data: NetworkDelayUpdateRequest, db_session: Sess
         if turn_data["turn"] == data.turn:
             if "timing" in turn_data:
                 turn_data["timing"]["network_delay_seconds"] = data.network_delay_seconds
-                print(f"Updated network delay for session {session_id}, turn {data.turn}: {data.network_delay_seconds}s")
+                
+                # Add network delay metadata if provided
+                if data.metadata:
+                    turn_data["timing"]["network_delay_metadata"] = data.metadata
+                    print(f"Updated network delay for session {session_id}, turn {data.turn}: {data.network_delay_seconds}s with metadata: {data.metadata.get('status', 'unknown')}")
+                else:
+                    print(f"Updated network delay for session {session_id}, turn {data.turn}: {data.network_delay_seconds}s")
                 
                 # Update the database immediately
                 update_session_after_message(session, db_session)
