@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, Column, String, Text, Float, Boolean, DateTime, Integer
+from sqlalchemy import create_engine, Column, String, Text, Float, Boolean, DateTime, Integer, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -9,15 +9,33 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-engine = create_engine(DATABASE_URL or "sqlite:///./test.db")
+# Configure connection pooling for better concurrent performance
+if DATABASE_URL and DATABASE_URL.startswith("postgresql://"):
+    # Production: PostgreSQL with optimized pooling
+    engine = create_engine(
+        DATABASE_URL,
+        pool_size=10,              # Number of connections to keep open
+        max_overflow=20,           # Additional connections when pool is exhausted
+        pool_timeout=30,           # Seconds to wait before timing out getting a connection
+        pool_recycle=3600,         # Recycle connections after 1 hour
+        pool_pre_ping=True,        # Test connections before using them
+        connect_args={
+            "connect_timeout": 10,  # Connection timeout in seconds
+            "options": "-c statement_timeout=30000"  # 30 second query timeout
+        }
+    )
+else:
+    # Development: SQLite without pooling
+    engine = create_engine(DATABASE_URL or "sqlite:///./test.db")
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 class StudySession(Base):
     __tablename__ = "study_sessions"
-    
+
     id = Column(String, primary_key=True)
-    user_id = Column(String)
+    user_id = Column(String, index=True)  # Add index for faster lookups
     start_time = Column(DateTime, default=datetime.utcnow)
     chosen_persona = Column(String)
     domain = Column(String)
@@ -40,12 +58,12 @@ class StudySession(Base):
     pure_ddm_timestamp = Column(DateTime, nullable=True)  # When they made it
     pure_ddm_turn_number = Column(Integer, nullable=True)  # Which message turn
     pure_ddm_decision_time_seconds = Column(Float, nullable=True)  # Time to make pure decision
-    reading_time_seconds = Column(Float, nullable=True)  # Time from AI response to first slider touch  
+    reading_time_seconds = Column(Float, nullable=True)  # Time from AI response to first slider touch
     active_decision_time_seconds = Column(Float, nullable=True)  # Time from first slider touch to submit
     slider_interaction_log = Column(Text, nullable=True)  # JSON of all slider interactions per turn
     # NEW: Session status tracking for incremental saves
-    session_status = Column(String, default="active")  # active, completed, interrupted
-    last_updated = Column(DateTime, default=datetime.utcnow)  # Track when session was last updated
+    session_status = Column(String, default="active", index=True)  # active, completed, interrupted - indexed for faster queries
+    last_updated = Column(DateTime, default=datetime.utcnow, index=True)  # Track when session was last updated - indexed for queries
     recovered_from_restart = Column(Boolean, default=False)  # Flag if session continued after Railway restart
 
 
