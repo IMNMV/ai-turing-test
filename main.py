@@ -8,6 +8,7 @@ import json
 import uuid
 import random
 import html
+import re
 from datetime import datetime
 
 from fastapi import FastAPI, Request, Depends, HTTPException
@@ -757,9 +758,17 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
             if not full_text:
                 raise ValueError("Could not extract any text from multi-part response")
 
-        if "RESEARCHER_NOTES:" in full_text:
-            user_text, researcher_notes_section = full_text.split("RESEARCHER_NOTES:", 1)
-            return user_text.strip(), researcher_notes_section.strip()
+        # Use regex to flexibly match RESEARCHER_NOTES with various formats
+        # Matches: RESEARCHER_NOTES:, researcher notes:, **RESEARCHER_NOTES:**, RESEARCHER NOTES:, etc.
+        pattern = r'(?i)\*?\*?RESEARCHER[\s_-]?NOTES\*?\*?\s*:'
+        match = re.search(pattern, full_text)
+
+        if match:
+            # Split at the matched position
+            split_pos = match.start()
+            user_text = full_text[:split_pos].strip()
+            researcher_notes_section = full_text[match.end():].strip()
+            return user_text, researcher_notes_section
         else:
             return full_text.strip(), "No researcher notes provided (keyword missing)."
 
@@ -791,12 +800,17 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
             print("Primary model failure recovered successfully")
             print("=" * 60)
             
-            if "RESEARCHER_NOTES:" in full_text_fallback:
-                user_text, researcher_notes_section = full_text_fallback.split("RESEARCHER_NOTES:", 1)
-                researcher_notes_clean = researcher_notes_section.strip()
+            # Use same flexible regex matching for fallback
+            pattern = r'(?i)\*?\*?RESEARCHER[\s_-]?NOTES\*?\*?\s*:'
+            match = re.search(pattern, full_text_fallback)
+
+            if match:
+                split_pos = match.start()
+                user_text = full_text_fallback[:split_pos].strip()
+                researcher_notes_clean = full_text_fallback[match.end():].strip()
                 # Add a note for the researcher that a fallback occurred
                 researcher_notes_with_alert = f"{researcher_notes_clean}\n\n[RESEARCHER ALERT: This response was generated using the FALLBACK model due to a primary model error: {e}]"
-                return user_text.strip(), researcher_notes_with_alert
+                return user_text, researcher_notes_with_alert
             else:
                 return full_text_fallback.strip(), f"No researcher notes provided (keyword missing). [FALLBACK USED due to error: {e}]"
 
