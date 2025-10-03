@@ -973,7 +973,6 @@ class ChatRequest(BaseModel):
     message: str
     typing_indicator_delay_seconds: Optional[float] = None
     network_delay_seconds: Optional[float] = None
-    user_message_display_timestamp: Optional[float] = None
 
 class ConversationStartRequest(BaseModel):
     session_id: str
@@ -983,7 +982,6 @@ class NetworkDelayUpdateRequest(BaseModel):
     turn: int
     network_delay_seconds: float
     send_attempts: Optional[int] = 1
-    ai_message_display_timestamp: Optional[float] = None
     metadata: Optional[Dict[str, Any]] = None
 
 class RatingRequest(BaseModel):
@@ -1364,9 +1362,7 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
             "api_call_time_seconds": time_spent_on_actual_ai_calls,
             "sleep_duration_seconds": sleep_duration_needed,
             "typing_indicator_delay_seconds": data.typing_indicator_delay_seconds,
-            "network_delay_seconds": None,  # Will be updated by separate network delay endpoint
-            "user_message_display_timestamp": data.user_message_display_timestamp,
-            "ai_message_display_timestamp": None  # Will be updated by network delay endpoint
+            "network_delay_seconds": None  # Will be updated by separate network delay endpoint
         }
     })
     session["ai_researcher_notes_log"].append({
@@ -1430,7 +1426,6 @@ async def update_network_delay(data: NetworkDelayUpdateRequest, db_session: Sess
             if "timing" in turn_data:
                 turn_data["timing"]["network_delay_seconds"] = data.network_delay_seconds
                 turn_data["timing"]["send_attempts"] = data.send_attempts
-                turn_data["timing"]["ai_message_display_timestamp"] = data.ai_message_display_timestamp
 
                 # Add network delay metadata if provided
                 if data.metadata:
