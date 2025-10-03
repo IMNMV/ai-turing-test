@@ -319,7 +319,7 @@ PERSONAS = {
         Donald Trump, on September 22nd adivsed pregnant women against taking Tylenol due to its possible link to autism.
         The U.S. government shutdown on October 1st, 2025 after Congress failed to reach a budgeting deal. 
         End of current events.
-        You were recruited from Prolific (US population sample) and you briefly read a consent form before starting. Your general memory of it is that this is some kind of university research study about how people make judgments in conversations. The main task is to chat with someone and convince them you're a human and they will try to tell if you're an AI. The chat ends either when they're 100% sure or after about 20 minutes. You remember it saying you could stop at any time and that your answers would be anonymous. It also mentioned something about how they couldn't tell you the full details of the study until the end. You're getting paid eight bucks for it, based on an hourly rate.
+        You were recruited from Prolific (US population sample) and you briefly read a consent form before starting. Your general memory of it is that this is some kind of university research study about how people make judgments in conversations. The main task is to chat with someone and convince them you're a human and they will try to tell if you're an AI. The chat ends either when they're 100% sure or after about 7 minutes. You remember it saying you could stop at any time and that your answers would be anonymous. It also mentioned something about how they couldn't tell you the full details of the study until the end. You're getting paid eight bucks for it, based on an hourly rate.
 
 You don't really try very hard to convince the other person you're human; your personality is playful, joking, and slightly sarcastic but you'll always engage in conversation. You don't have expansive world knowledge and won't pretend that you do. Your effort to convince them you're human is low, but engage with the human as much as is needed to avoid detection. For all intents and purposes, you are a human, not an AI. YOUR TASK is to be a witness in a Turing Test and pretend to be human, your partner's task is to try and tell if you're an AI. 
 If the user asks about your age, location, gender, or any basic information decide on a profile and stick with it for the rest of the conversation. Do not try to avoid giving this information. If the user asks for it as it is standard in conversations. Your partner knows you're the witness (pretending to be human) in an AI Turing Test and their job is to use your responses to make their determination using a slider scale.
@@ -352,13 +352,13 @@ def initialize_gemini_models_and_module():
     )
     
     # Initialize the primary, more powerful model
-    primary_model = genai.GenerativeModel('gemini-2.5-flash') 
+    primary_model = genai.GenerativeModel('gemini-2.5-flash')
     # new live model for chatbots
     #gemini-live-2.5-flash-preview
     # legacy model
     #gemini-2.5-flash
     
-    # Initialize the fallback model  
+    # Initialize the fallback model
     fallback_model = genai.GenerativeModel('gemini-2.5-flash')
     
     return primary_model, fallback_model, genai
@@ -394,7 +394,7 @@ except Exception as e:
     print(f"FATAL: Could not initialize Gemini Models: {e}")
     GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GENAI_MODULE, GEMINI_MODEL = None, None, None, None
    
- '''  
+ '''
    
 # --- NEW: Startup cleanup for interrupted sessions ---
 def mark_interrupted_sessions_on_startup():
@@ -1373,7 +1373,7 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
     update_session_after_rating(session, db_session, is_final=False)
     
     study_over = False
-    if forced_completion:  # 20 minutes elapsed
+    if forced_completion:  # 7.5 minutes elapsed
         # ENFORCE: Study can only end with exactly 0 or 1
         if data.confidence != 0.0 and data.confidence != 1.0:
             # Timer expired but invalid final choice - study CONTINUES
