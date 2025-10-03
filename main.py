@@ -1441,7 +1441,7 @@ async def log_conversation_start(data: ConversationStartRequest, db_session: Ses
 @app.post("/update_network_delay")
 async def update_network_delay(data: NetworkDelayUpdateRequest, db_session: Session = Depends(get_db)):
     session_id = data.session_id
-    
+
     # Try to recover session from database if not in memory
     if session_id not in sessions:
         recovered_session = recover_session_from_database(session_id, db_session)
@@ -1450,12 +1450,14 @@ async def update_network_delay(data: NetworkDelayUpdateRequest, db_session: Sess
             flag_session_as_recovered(session_id, db_session)
         else:
             raise HTTPException(status_code=404, detail="Session not found")
-    
+
     session = sessions[session_id]
-    
+
     # Find the conversation turn and update its network delay
+    turn_found = False
     for turn_data in session["conversation_log"]:
         if turn_data["turn"] == data.turn:
+            turn_found = True
             if "timing" in turn_data:
                 turn_data["timing"]["network_delay_seconds"] = data.network_delay_seconds
                 turn_data["timing"]["send_attempts"] = data.send_attempts
@@ -1467,12 +1469,21 @@ async def update_network_delay(data: NetworkDelayUpdateRequest, db_session: Sess
                 else:
                     print(f"Updated network delay for session {session_id}, turn {data.turn}: {data.network_delay_seconds}s, attempts: {data.send_attempts}")
 
-                # Update the database immediately
-                update_session_after_message(session, db_session)
+                break  # Exit loop once turn is found and updated
 
-                return {"message": "Network delay updated successfully"}
-    
-    raise HTTPException(status_code=404, detail=f"Turn {data.turn} not found in session {session_id}")
+    if not turn_found:
+        raise HTTPException(status_code=404, detail=f"Turn {data.turn} not found in session {session_id}")
+
+    # Update the database in a non-blocking way with error handling
+    # This is less critical data, so we don't want to fail the entire request if DB is slow
+    try:
+        update_session_after_message(session, db_session)
+    except Exception as db_error:
+        # Log the database error but don't fail the request
+        print(f"Warning: Database update failed for network delay (session {session_id}, turn {data.turn}): {db_error}")
+        # The data is still in memory, so it will be saved on the next successful DB operation
+
+    return {"message": "Network delay updated successfully"}
 
 @app.post("/submit_rating")
 async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_db)):
