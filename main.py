@@ -597,62 +597,75 @@ def select_tactic_for_current_turn(
             {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
-    try:
-        response = model.generate_content(
-            contents=system_prompt_for_tactic_selection,
-            safety_settings=safety_settings
-        )
-        full_text = response.text.strip()
+    # Retry logic for 504 errors
+    max_retries = 3
+    retry_delay = 3  # seconds
 
-        chosen_tactic_key = None
-        justification = f"Tactic selection model did not provide a clear justification or valid tactic for turn {current_turn_number} in response to user: '{current_user_message[:50]}...'."
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = model.generate_content(
+                contents=system_prompt_for_tactic_selection,
+                safety_settings=safety_settings
+            )
+            full_text = response.text.strip()
 
-        lines = full_text.splitlines()
-        for i, line_content in enumerate(lines):
-            line_upper = line_content.strip().upper()
-            if line_upper.startswith("CHOSEN TACTIC:"):
-                try:
-                    tactic_part = line_content.split(":", 1)[1].strip()
-                    tactic_key_raw = tactic_part.lower()
-                except IndexError:
-                    tactic_key_raw = ""
-                    print(f"Warning (select_tactic): Malformed 'CHOSEN TACTIC:' line: {line_content}")
+            # If successful, break out of retry loop
+            break
 
-                if tactic_key_raw in PSYCHOLOGICAL_TACTICS and tactic_key_raw != "none":
-                    chosen_tactic_key = tactic_key_raw
-                    if (i + 1 < len(lines)):
-                        next_line_content = lines[i+1].strip()
-                        if next_line_content.upper().startswith("JUSTIFICATION:"):
-                            try:
-                                justification = next_line_content.split(":", 1)[1].strip()
-                            except IndexError:
-                                justification = next_line_content[len("JUSTIFICATION:"):].strip() if len(next_line_content) > len("JUSTIFICATION:") else "Justification format error."
-                                print(f"Warning (select_tactic): Malformed 'JUSTIFICATION:' line (missing colon?): {next_line_content}")
+        except Exception as e:
+            error_str = str(e)
+            if "504" in error_str or "Gateway Time-out" in error_str or "timeout" in error_str.lower():
+                if attempt < max_retries:
+                    print(f"504/timeout error in tactic selection (attempt {attempt}/{max_retries}), retrying in {retry_delay}s: {error_str[:200]}")
+                    time.sleep(retry_delay)
+                    continue
                 else:
-                    print(f"Warning (select_tactic): LLM proposed invalid or 'none' tactic '{tactic_key_raw}' (from line: '{line_content}') for turn {current_turn_number}. Will use fallback.")
-                break
+                    print(f"504/timeout error in tactic selection after {max_retries} attempts, using fallback")
+                    raise
+            else:
+                # Non-504 error, raise immediately
+                raise
 
-        if chosen_tactic_key is None:
-            fallback_idx = min(max(0, current_turn_number - 1), len(FALLBACK_TACTICS_SEQUENCE) - 1)
-            chosen_tactic_key = FALLBACK_TACTICS_SEQUENCE[fallback_idx]
-            if chosen_tactic_key is None and current_turn_number > 1 :
-                 chosen_tactic_key = "mirroring"
-            new_justification = (f"LLM failed to provide a valid non-'None' tactic for turn {current_turn_number} "
-                                 f"(in response to user: '{current_user_message[:50]}...'; LLM raw: '{full_text[:200]}...'). "
-                                 f"Using fallback tactic: {chosen_tactic_key}.")
-            justification = new_justification
-            print(f"Warning (select_tactic): {justification}")
+    chosen_tactic_key = None
+    justification = f"Tactic selection model did not provide a clear justification or valid tactic for turn {current_turn_number} in response to user: '{current_user_message[:50]}...'."
 
-        return chosen_tactic_key, justification
+    lines = full_text.splitlines()
+    for i, line_content in enumerate(lines):
+        line_upper = line_content.strip().upper()
+        if line_upper.startswith("CHOSEN TACTIC:"):
+            try:
+                tactic_part = line_content.split(":", 1)[1].strip()
+                tactic_key_raw = tactic_part.lower()
+            except IndexError:
+                tactic_key_raw = ""
+                print(f"Warning (select_tactic): Malformed 'CHOSEN TACTIC:' line: {line_content}")
 
-    except Exception as e:
-        print(f"Error in select_tactic_for_current_turn (turn {current_turn_number}, user: '{current_user_message[:50]}...'): {str(e)}. LLM raw response attempt: '{getattr(e, 'message', 'N/A')}'")
+            if tactic_key_raw in PSYCHOLOGICAL_TACTICS and tactic_key_raw != "none":
+                chosen_tactic_key = tactic_key_raw
+                if (i + 1 < len(lines)):
+                    next_line_content = lines[i+1].strip()
+                    if next_line_content.upper().startswith("JUSTIFICATION:"):
+                        try:
+                            justification = next_line_content.split(":", 1)[1].strip()
+                        except IndexError:
+                            justification = next_line_content[len("JUSTIFICATION:"):].strip() if len(next_line_content) > len("JUSTIFICATION:") else "Justification format error."
+                            print(f"Warning (select_tactic): Malformed 'JUSTIFICATION:' line (missing colon?): {next_line_content}")
+            else:
+                print(f"Warning (select_tactic): LLM proposed invalid or 'none' tactic '{tactic_key_raw}' (from line: '{line_content}') for turn {current_turn_number}. Will use fallback.")
+            break
+
+    if chosen_tactic_key is None:
         fallback_idx = min(max(0, current_turn_number - 1), len(FALLBACK_TACTICS_SEQUENCE) - 1)
-        chosen_tactic = FALLBACK_TACTICS_SEQUENCE[fallback_idx]
-        if chosen_tactic is None and current_turn_number > 1:
-            chosen_tactic = "mirroring"
-        justification = f"Exception during tactic selection for turn {current_turn_number} (user: '{current_user_message[:50]}...'), used fallback: {chosen_tactic}. Error: {str(e)}"
-        return chosen_tactic, justification
+        chosen_tactic_key = FALLBACK_TACTICS_SEQUENCE[fallback_idx]
+        if chosen_tactic_key is None and current_turn_number > 1 :
+             chosen_tactic_key = "mirroring"
+        new_justification = (f"LLM failed to provide a valid non-'None' tactic for turn {current_turn_number} "
+                             f"(in response to user: '{current_user_message[:50]}...'; LLM raw: '{full_text[:200]}...'). "
+                             f"Using fallback tactic: {chosen_tactic_key}.")
+        justification = new_justification
+        print(f"Warning (select_tactic): {justification}")
+
+    return chosen_tactic_key, justification
 
 def generate_ai_response(model, prompt:str, technique:Optional[str], user_profile:Dict, conversation_history:List[Dict], chosen_persona_key: str):
     if not GEMINI_PRO_MODEL or not GEMINI_FLASH_MODEL:
@@ -736,10 +749,35 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
             {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
+    # Retry logic for 504 errors on primary model
+    max_retries = 3
+    retry_delay = 3  # seconds
+    response = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            # --- ATTEMPT: PRIMARY MODEL ---
+            response = GEMINI_PRO_MODEL.generate_content(contents=system_prompt, safety_settings=safety_settings)
+            # If successful, break out of retry loop
+            break
+
+        except Exception as e:
+            error_str = str(e)
+            if "504" in error_str or "Gateway Time-out" in error_str or "timeout" in error_str.lower():
+                if attempt < max_retries:
+                    print(f"504/timeout error in primary model AI response (attempt {attempt}/{max_retries}), retrying in {retry_delay}s: {error_str[:200]}")
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    # All retries exhausted on primary, will try fallback
+                    print(f"504/timeout error in primary model after {max_retries} attempts, switching to fallback")
+                    raise
+            else:
+                # Non-504 error, raise immediately to try fallback
+                raise
+
+    # Process the response (this code runs after successful primary model call)
     try:
-        # --- ATTEMPT 1: PRIMARY MODEL (PRO) ---
-        # print("Attempting to generate response with GEMINI_PRO_MODEL...")
-        response = GEMINI_PRO_MODEL.generate_content(contents=system_prompt, safety_settings=safety_settings)
         
         # Robust text extraction to handle multi-part responses
         try:
@@ -786,9 +824,31 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
         print("Attempting fallback model...")
         print("=" * 60)
         
+        # Retry logic for 504 errors on fallback model
+        response_fallback = None
+        for attempt_fallback in range(1, max_retries + 1):
+            try:
+                # --- ATTEMPT: FALLBACK MODEL ---
+                response_fallback = GEMINI_FLASH_MODEL.generate_content(contents=system_prompt, safety_settings=safety_settings)
+                # If successful, break out of retry loop
+                break
+
+            except Exception as e_fb:
+                error_str_fb = str(e_fb)
+                if "504" in error_str_fb or "Gateway Time-out" in error_str_fb or "timeout" in error_str_fb.lower():
+                    if attempt_fallback < max_retries:
+                        print(f"504/timeout error in fallback model AI response (attempt {attempt_fallback}/{max_retries}), retrying in {retry_delay}s: {error_str_fb[:200]}")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        # All retries exhausted on fallback too
+                        print(f"504/timeout error in fallback model after {max_retries} attempts")
+                        raise
+                else:
+                    # Non-504 error, raise immediately
+                    raise
+
         try:
-            # --- ATTEMPT 2: FALLBACK MODEL (FLASH) ---
-            response_fallback = GEMINI_FLASH_MODEL.generate_content(contents=system_prompt, safety_settings=safety_settings)
             full_text_fallback = response_fallback.text
             
             # Log successful fallback
@@ -1114,15 +1174,24 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
     actual_ai_processing_start_time = time.time()
     retrieved_chosen_persona_key = session["chosen_persona_key"]
 
-    tactic_key_for_this_turn, tactic_sel_justification = select_tactic_for_current_turn(
-        GEMINI_MODEL,
-        session["initial_user_profile_survey"],
-        user_message,
-        session["conversation_log"],
-        session["initial_tactic_analysis"],
-        current_ai_response_turn,
-        retrieved_chosen_persona_key
-    )
+    try:
+        tactic_key_for_this_turn, tactic_sel_justification = select_tactic_for_current_turn(
+            GEMINI_MODEL,
+            session["initial_user_profile_survey"],
+            user_message,
+            session["conversation_log"],
+            session["initial_tactic_analysis"],
+            current_ai_response_turn,
+            retrieved_chosen_persona_key
+        )
+    except Exception as e:
+        # Fallback if tactic selection fails after all retries
+        print(f"Tactic selection failed after retries (turn {current_ai_response_turn}): {str(e)}")
+        fallback_idx = min(max(0, current_ai_response_turn - 1), len(FALLBACK_TACTICS_SEQUENCE) - 1)
+        tactic_key_for_this_turn = FALLBACK_TACTICS_SEQUENCE[fallback_idx]
+        if tactic_key_for_this_turn is None and current_ai_response_turn > 1:
+            tactic_key_for_this_turn = "mirroring"
+        tactic_sel_justification = f"Tactic selection failed after all retry attempts (turn {current_ai_response_turn}): {str(e)}. Using fallback: {tactic_key_for_this_turn}"
     session["tactic_selection_log"].append({
         "turn": current_ai_response_turn,
         "tactic_selected": tactic_key_for_this_turn,
