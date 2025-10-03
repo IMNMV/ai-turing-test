@@ -476,7 +476,7 @@ def analyze_profile_for_initial_tactic_recommendation(primary_model, fallback_mo
     Analyzes user profile to recommend an initial tactic, with Pro-to-Flash fallback.
     """
     if not primary_model or not fallback_model:
-        return {"full_analysis": "Error: AI models not initialized.", "recommended_tactic_key": "mirroring"}
+        return {"full_analysis": "Error: AI models not initialized.", "recommended_tactic_key": "typo"}
 
     readable_profile = convert_profile_to_readable(user_profile)
     system_prompt = f"""
@@ -505,7 +505,7 @@ def analyze_profile_for_initial_tactic_recommendation(primary_model, fallback_mo
 
     def parse_tactic_from_response(text):
         """Helper to extract tactic key from model response."""
-        key = "mirroring" # Default
+        key = "typo" # Default
         if "RECOMMENDED INITIAL TACTIC (for AI's 2nd/3rd turn):" in text:
             parts = text.split("RECOMMENDED INITIAL TACTIC (for AI's 2nd/3rd turn):")
             if len(parts) > 1:
@@ -516,28 +516,61 @@ def analyze_profile_for_initial_tactic_recommendation(primary_model, fallback_mo
                     key = raw_key
         return key
 
-    try:
-        # --- ATTEMPT 1: PRIMARY MODEL (PRO) ---
-        response = primary_model.generate_content(contents=system_prompt)
-        full_text = response.text
-        recommended_tactic = parse_tactic_from_response(full_text)
-        return {"full_analysis": full_text, "recommended_tactic_key": recommended_tactic}
+    # Retry logic for retryable errors on primary model
+    max_retries = 3
+    retry_delay = 3  # seconds
 
-    except Exception as e:
-        print(f"--- WARNING: Primary model failed during initial analysis: {e}. Switching to fallback. ---")
+    for attempt in range(1, max_retries + 1):
         try:
-            # --- ATTEMPT 2: FALLBACK MODEL (FLASH) ---
+            # --- ATTEMPT: PRIMARY MODEL (PRO) ---
+            response = primary_model.generate_content(contents=system_prompt)
+            full_text = response.text
+            recommended_tactic = parse_tactic_from_response(full_text)
+            return {"full_analysis": full_text, "recommended_tactic_key": recommended_tactic}
+
+        except Exception as e:
+            if is_retryable_error(e):
+                if attempt < max_retries:
+                    print(f"Retryable error in initial tactic analysis primary model (attempt {attempt}/{max_retries}), retrying in {retry_delay}s: {str(e)[:200]}")
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    # All retries exhausted on primary, will try fallback
+                    print(f"Retryable error in initial tactic analysis primary model after {max_retries} attempts, switching to fallback")
+                    break
+            else:
+                # Non-retryable error, immediately try fallback
+                print(f"--- WARNING: Primary model failed during initial analysis: {e}. Switching to fallback. ---")
+                break
+
+    # Primary model failed after retries, try fallback model
+    for attempt_fallback in range(1, max_retries + 1):
+        try:
+            # --- ATTEMPT: FALLBACK MODEL (FLASH) ---
             response_fallback = fallback_model.generate_content(contents=system_prompt)
             full_text_fallback = response_fallback.text
             recommended_tactic_fallback = parse_tactic_from_response(full_text_fallback)
-            analysis_with_alert = f"{full_text_fallback}\n\n[RESEARCHER ALERT: This analysis was generated using the FALLBACK model due to a primary model error: {e}]"
+            analysis_with_alert = f"{full_text_fallback}\n\n[RESEARCHER ALERT: This analysis was generated using the FALLBACK model due to a primary model error.]"
             return {"full_analysis": analysis_with_alert, "recommended_tactic_key": recommended_tactic_fallback}
 
         except Exception as e_fallback:
-            # --- BOTH MODELS FAILED ---
-            print(f"--- CRITICAL: Fallback model also failed during initial analysis: {e_fallback}. ---")
-            error_message = f"CRITICAL FAILURE: Both models failed during initial analysis. Primary Error: {e}. Fallback Error: {e_fallback}."
-            return {"full_analysis": error_message, "recommended_tactic_key": "mirroring"}
+            if is_retryable_error(e_fallback):
+                if attempt_fallback < max_retries:
+                    print(f"Retryable error in initial tactic analysis fallback model (attempt {attempt_fallback}/{max_retries}), retrying in {retry_delay}s: {str(e_fallback)[:200]}")
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    # All retries exhausted on fallback too
+                    print(f"Retryable error in initial tactic analysis fallback model after {max_retries} attempts")
+                    break
+            else:
+                # Non-retryable error on fallback
+                print(f"--- CRITICAL: Fallback model also failed during initial analysis: {e_fallback}. ---")
+                break
+
+    # --- BOTH MODELS FAILED AFTER ALL RETRIES ---
+    error_message = f"CRITICAL FAILURE: Both models failed during initial analysis after all retry attempts."
+    return {"full_analysis": error_message, "recommended_tactic_key": "typo"}
 
 def select_tactic_for_current_turn(
     model,
@@ -555,7 +588,7 @@ def select_tactic_for_current_turn(
         fallback_idx = min(max(0, current_turn_number - 1), len(FALLBACK_TACTICS_SEQUENCE) - 1)
         tactic_to_use = FALLBACK_TACTICS_SEQUENCE[fallback_idx]
         if current_turn_number > 1 and tactic_to_use is None:
-            tactic_to_use = "mirroring"
+            tactic_to_use = "typo"
         return tactic_to_use, "Error: Gemini model not initialized, using fallback sequence for tactic selection."
 
     if current_turn_number == 1:
@@ -679,7 +712,7 @@ def select_tactic_for_current_turn(
         fallback_idx = min(max(0, current_turn_number - 1), len(FALLBACK_TACTICS_SEQUENCE) - 1)
         chosen_tactic_key = FALLBACK_TACTICS_SEQUENCE[fallback_idx]
         if chosen_tactic_key is None and current_turn_number > 1 :
-             chosen_tactic_key = "mirroring"
+             chosen_tactic_key = "typo"
         new_justification = (f"LLM failed to provide a valid non-'None' tactic for turn {current_turn_number} "
                              f"(in response to user: '{current_user_message[:50]}...'; LLM raw: '{full_text[:200]}...'). "
                              f"Using fallback tactic: {chosen_tactic_key}.")
@@ -1224,7 +1257,7 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         fallback_idx = min(max(0, current_ai_response_turn - 1), len(FALLBACK_TACTICS_SEQUENCE) - 1)
         tactic_key_for_this_turn = FALLBACK_TACTICS_SEQUENCE[fallback_idx]
         if tactic_key_for_this_turn is None and current_ai_response_turn > 1:
-            tactic_key_for_this_turn = "mirroring"
+            tactic_key_for_this_turn = "typo"
         tactic_sel_justification = f"Tactic selection failed after all retry attempts (turn {current_ai_response_turn}): {str(e)}. Using fallback: {tactic_key_for_this_turn}"
     session["tactic_selection_log"].append({
         "turn": current_ai_response_turn,
