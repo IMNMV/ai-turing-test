@@ -437,6 +437,28 @@ mark_interrupted_sessions_on_startup()
 
 # --- Core Logic Functions (analyze_profile, select_tactic, generate_ai_response, update_personality_vector, assign_domain, save_session_data_to_csv - UNCHANGED unless specified) ---
 
+def is_retryable_error(error):
+    """Check if an API error should be retried based on error code/message"""
+    error_str = str(error).lower()
+
+    # Retryable HTTP status codes and canonical error codes
+    retryable_patterns = [
+        "400",  # INVALID_ARGUMENT - might be transient validation issue
+        "429",  # RESOURCE_EXHAUSTED - rate limit, retry with backoff
+        "500",  # INTERNAL - server error, retry
+        "503",  # UNAVAILABLE - service temporarily unavailable
+        "504",  # DEADLINE_EXCEEDED - timeout
+        "gateway time-out",
+        "timeout",
+        "resource_exhausted",
+        "unavailable",
+        "internal",
+        "deadline_exceeded",
+        "unknown"
+    ]
+
+    return any(pattern in error_str for pattern in retryable_patterns)
+
 def convert_profile_to_readable(user_profile):
     """Convert raw survey data to human-readable labels"""
     readable_profile = user_profile.copy()
@@ -613,17 +635,16 @@ def select_tactic_for_current_turn(
             break
 
         except Exception as e:
-            error_str = str(e)
-            if "504" in error_str or "Gateway Time-out" in error_str or "timeout" in error_str.lower():
+            if is_retryable_error(e):
                 if attempt < max_retries:
-                    print(f"504/timeout error in tactic selection (attempt {attempt}/{max_retries}), retrying in {retry_delay}s: {error_str[:200]}")
+                    print(f"Retryable error in tactic selection (attempt {attempt}/{max_retries}), retrying in {retry_delay}s: {str(e)[:200]}")
                     time.sleep(retry_delay)
                     continue
                 else:
-                    print(f"504/timeout error in tactic selection after {max_retries} attempts, using fallback")
+                    print(f"Retryable error in tactic selection after {max_retries} attempts, using fallback")
                     raise
             else:
-                # Non-504 error, raise immediately
+                # Non-retryable error, raise immediately
                 raise
 
     chosen_tactic_key = None
@@ -762,18 +783,17 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
             break
 
         except Exception as e:
-            error_str = str(e)
-            if "504" in error_str or "Gateway Time-out" in error_str or "timeout" in error_str.lower():
+            if is_retryable_error(e):
                 if attempt < max_retries:
-                    print(f"504/timeout error in primary model AI response (attempt {attempt}/{max_retries}), retrying in {retry_delay}s: {error_str[:200]}")
+                    print(f"Retryable error in primary model AI response (attempt {attempt}/{max_retries}), retrying in {retry_delay}s: {str(e)[:200]}")
                     time.sleep(retry_delay)
                     continue
                 else:
                     # All retries exhausted on primary, will try fallback
-                    print(f"504/timeout error in primary model after {max_retries} attempts, switching to fallback")
+                    print(f"Retryable error in primary model after {max_retries} attempts, switching to fallback")
                     raise
             else:
-                # Non-504 error, raise immediately to try fallback
+                # Non-retryable error, raise immediately to try fallback
                 raise
 
     # Process the response (this code runs after successful primary model call)
@@ -834,18 +854,17 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
                 break
 
             except Exception as e_fb:
-                error_str_fb = str(e_fb)
-                if "504" in error_str_fb or "Gateway Time-out" in error_str_fb or "timeout" in error_str_fb.lower():
+                if is_retryable_error(e_fb):
                     if attempt_fallback < max_retries:
-                        print(f"504/timeout error in fallback model AI response (attempt {attempt_fallback}/{max_retries}), retrying in {retry_delay}s: {error_str_fb[:200]}")
+                        print(f"Retryable error in fallback model AI response (attempt {attempt_fallback}/{max_retries}), retrying in {retry_delay}s: {str(e_fb)[:200]}")
                         time.sleep(retry_delay)
                         continue
                     else:
                         # All retries exhausted on fallback too
-                        print(f"504/timeout error in fallback model after {max_retries} attempts")
+                        print(f"Retryable error in fallback model after {max_retries} attempts")
                         raise
                 else:
-                    # Non-504 error, raise immediately
+                    # Non-retryable error, raise immediately
                     raise
 
         try:
