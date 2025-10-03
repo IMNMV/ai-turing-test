@@ -9,6 +9,7 @@ import uuid
 import random
 import html
 import re
+import asyncio
 from datetime import datetime
 
 from fastapi import FastAPI, Request, Depends, HTTPException
@@ -471,7 +472,7 @@ def convert_profile_to_readable(user_profile):
 
 
 
-def analyze_profile_for_initial_tactic_recommendation(primary_model, fallback_model, user_profile):
+async def analyze_profile_for_initial_tactic_recommendation(primary_model, fallback_model, user_profile):
     """
     Analyzes user profile to recommend an initial tactic, with Pro-to-Flash fallback.
     """
@@ -516,14 +517,13 @@ def analyze_profile_for_initial_tactic_recommendation(primary_model, fallback_mo
                     key = raw_key
         return key
 
-    # Retry logic for retryable errors on primary model
+    # Retry logic with exponential backoff and jitter
     max_retries = 3
-    retry_delay = 3  # seconds
 
     for attempt in range(1, max_retries + 1):
         try:
-            # --- ATTEMPT: PRIMARY MODEL (PRO) ---
-            response = primary_model.generate_content(contents=system_prompt)
+            # --- ATTEMPT: PRIMARY MODEL (PRO) (NON-BLOCKING) ---
+            response = await asyncio.to_thread(primary_model.generate_content, contents=system_prompt)
             full_text = response.text
             recommended_tactic = parse_tactic_from_response(full_text)
             return {"full_analysis": full_text, "recommended_tactic_key": recommended_tactic}
@@ -531,8 +531,13 @@ def analyze_profile_for_initial_tactic_recommendation(primary_model, fallback_mo
         except Exception as e:
             if is_retryable_error(e):
                 if attempt < max_retries:
-                    print(f"Retryable error in initial tactic analysis primary model (attempt {attempt}/{max_retries}), retrying in {retry_delay}s: {str(e)[:200]}")
-                    time.sleep(retry_delay)
+                    # Exponential backoff with jitter
+                    base_delay = 2 ** (attempt - 1) * 0.5
+                    jitter = random.uniform(0, base_delay)
+                    backoff_time = base_delay + jitter
+
+                    print(f"Retryable error in initial tactic analysis primary model (attempt {attempt}/{max_retries}), retrying in {backoff_time:.2f}s: {str(e)[:200]}")
+                    await asyncio.sleep(backoff_time)
                     continue
                 else:
                     # All retries exhausted on primary, will try fallback
@@ -546,8 +551,8 @@ def analyze_profile_for_initial_tactic_recommendation(primary_model, fallback_mo
     # Primary model failed after retries, try fallback model
     for attempt_fallback in range(1, max_retries + 1):
         try:
-            # --- ATTEMPT: FALLBACK MODEL (FLASH) ---
-            response_fallback = fallback_model.generate_content(contents=system_prompt)
+            # --- ATTEMPT: FALLBACK MODEL (FLASH) (NON-BLOCKING) ---
+            response_fallback = await asyncio.to_thread(fallback_model.generate_content, contents=system_prompt)
             full_text_fallback = response_fallback.text
             recommended_tactic_fallback = parse_tactic_from_response(full_text_fallback)
             analysis_with_alert = f"{full_text_fallback}\n\n[RESEARCHER ALERT: This analysis was generated using the FALLBACK model due to a primary model error.]"
@@ -556,8 +561,13 @@ def analyze_profile_for_initial_tactic_recommendation(primary_model, fallback_mo
         except Exception as e_fallback:
             if is_retryable_error(e_fallback):
                 if attempt_fallback < max_retries:
-                    print(f"Retryable error in initial tactic analysis fallback model (attempt {attempt_fallback}/{max_retries}), retrying in {retry_delay}s: {str(e_fallback)[:200]}")
-                    time.sleep(retry_delay)
+                    # Exponential backoff with jitter
+                    base_delay = 2 ** (attempt_fallback - 1) * 0.5
+                    jitter = random.uniform(0, base_delay)
+                    backoff_time = base_delay + jitter
+
+                    print(f"Retryable error in initial tactic analysis fallback model (attempt {attempt_fallback}/{max_retries}), retrying in {backoff_time:.2f}s: {str(e_fallback)[:200]}")
+                    await asyncio.sleep(backoff_time)
                     continue
                 else:
                     # All retries exhausted on fallback too
@@ -572,7 +582,7 @@ def analyze_profile_for_initial_tactic_recommendation(primary_model, fallback_mo
     error_message = f"CRITICAL FAILURE: Both models failed during initial analysis after all retry attempts."
     return {"full_analysis": error_message, "recommended_tactic_key": "typo"}
 
-def select_tactic_for_current_turn(
+async def select_tactic_for_current_turn(
     model,
     user_profile: Dict[str, Any],
     current_user_message: str,
@@ -652,13 +662,13 @@ def select_tactic_for_current_turn(
             {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
-    # Retry logic for 504 errors
+    # Retry logic with exponential backoff and jitter
     max_retries = 3
-    retry_delay = 3  # seconds
 
     for attempt in range(1, max_retries + 1):
         try:
-            response = model.generate_content(
+            response = await asyncio.to_thread(
+                model.generate_content,
                 contents=system_prompt_for_tactic_selection,
                 safety_settings=safety_settings
             )
@@ -670,8 +680,13 @@ def select_tactic_for_current_turn(
         except Exception as e:
             if is_retryable_error(e):
                 if attempt < max_retries:
-                    print(f"Retryable error in tactic selection (attempt {attempt}/{max_retries}), retrying in {retry_delay}s: {str(e)[:200]}")
-                    time.sleep(retry_delay)
+                    # Exponential backoff with jitter
+                    base_delay = 2 ** (attempt - 1) * 0.5
+                    jitter = random.uniform(0, base_delay)
+                    backoff_time = base_delay + jitter
+
+                    print(f"Retryable error in tactic selection (attempt {attempt}/{max_retries}), retrying in {backoff_time:.2f}s: {str(e)[:200]}")
+                    await asyncio.sleep(backoff_time)
                     continue
                 else:
                     print(f"Retryable error in tactic selection after {max_retries} attempts, using fallback")
@@ -721,7 +736,7 @@ def select_tactic_for_current_turn(
 
     return chosen_tactic_key, justification
 
-def generate_ai_response(model, prompt:str, technique:Optional[str], user_profile:Dict, conversation_history:List[Dict], chosen_persona_key: str):
+async def generate_ai_response(model, prompt:str, technique:Optional[str], user_profile:Dict, conversation_history:List[Dict], chosen_persona_key: str):
     if not GEMINI_PRO_MODEL or not GEMINI_FLASH_MODEL:
         return "Error: AI models are not initialized.", "No researcher notes due to model init error.", {"retry_attempts": 0, "retry_time": 0.0}
 
@@ -803,27 +818,35 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
             {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
-    # Retry logic for 504 errors on primary model
+    # Retry logic with exponential backoff and jitter
     max_retries = 3
-    retry_delay = 3  # seconds
     response = None
     primary_retry_attempts = 0
     primary_retry_time = 0.0
 
     for attempt in range(1, max_retries + 1):
         try:
-            # --- ATTEMPT: PRIMARY MODEL ---
-            response = GEMINI_PRO_MODEL.generate_content(contents=system_prompt, safety_settings=safety_settings)
+            # --- ATTEMPT: PRIMARY MODEL (NON-BLOCKING) ---
+            response = await asyncio.to_thread(
+                GEMINI_PRO_MODEL.generate_content,
+                contents=system_prompt,
+                safety_settings=safety_settings
+            )
             # If successful, break out of retry loop
             break
 
         except Exception as e:
             if is_retryable_error(e):
                 if attempt < max_retries:
-                    print(f"Retryable error in primary model AI response (attempt {attempt}/{max_retries}), retrying in {retry_delay}s: {str(e)[:200]}")
+                    # Exponential backoff with jitter: 0.5-1s, 1-2s, 2-4s
+                    base_delay = 2 ** (attempt - 1) * 0.5
+                    jitter = random.uniform(0, base_delay)
+                    backoff_time = base_delay + jitter
+
+                    print(f"Retryable error in primary model AI response (attempt {attempt}/{max_retries}), retrying in {backoff_time:.2f}s: {str(e)[:200]}")
                     primary_retry_attempts += 1
-                    primary_retry_time += retry_delay
-                    time.sleep(retry_delay)
+                    primary_retry_time += backoff_time
+                    await asyncio.sleep(backoff_time)
                     continue
                 else:
                     # All retries exhausted on primary, will try fallback
@@ -881,25 +904,34 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
         print("Attempting fallback model...")
         print("=" * 60)
         
-        # Retry logic for 504 errors on fallback model
+        # Retry logic for fallback model with exponential backoff
         response_fallback = None
         fallback_retry_attempts = 0
         fallback_retry_time = 0.0
 
         for attempt_fallback in range(1, max_retries + 1):
             try:
-                # --- ATTEMPT: FALLBACK MODEL ---
-                response_fallback = GEMINI_FLASH_MODEL.generate_content(contents=system_prompt, safety_settings=safety_settings)
+                # --- ATTEMPT: FALLBACK MODEL (NON-BLOCKING) ---
+                response_fallback = await asyncio.to_thread(
+                    GEMINI_FLASH_MODEL.generate_content,
+                    contents=system_prompt,
+                    safety_settings=safety_settings
+                )
                 # If successful, break out of retry loop
                 break
 
             except Exception as e_fb:
                 if is_retryable_error(e_fb):
                     if attempt_fallback < max_retries:
-                        print(f"Retryable error in fallback model AI response (attempt {attempt_fallback}/{max_retries}), retrying in {retry_delay}s: {str(e_fb)[:200]}")
+                        # Exponential backoff with jitter
+                        base_delay = 2 ** (attempt_fallback - 1) * 0.5
+                        jitter = random.uniform(0, base_delay)
+                        backoff_time = base_delay + jitter
+
+                        print(f"Retryable error in fallback model AI response (attempt {attempt_fallback}/{max_retries}), retrying in {backoff_time:.2f}s: {str(e_fb)[:200]}")
                         fallback_retry_attempts += 1
-                        fallback_retry_time += retry_delay
-                        time.sleep(retry_delay)
+                        fallback_retry_time += backoff_time
+                        await asyncio.sleep(backoff_time)
                         continue
                     else:
                         # All retries exhausted on fallback too
@@ -1105,8 +1137,8 @@ async def initialize_study(data: InitializeRequest, db_session: Session = Depend
     # --- MODIFIED SECTION ---
     initial_tactic_analysis_for_session = {"full_analysis": "N/A: Control group.", "recommended_tactic_key": None}
     if chosen_persona_key != "control":
-        # Call the updated function with both the primary and fallback models
-        analysis_result = analyze_profile_for_initial_tactic_recommendation(
+        # Call the updated async function with both the primary and fallback models
+        analysis_result = await analyze_profile_for_initial_tactic_recommendation(
             GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, initial_user_profile_from_survey
         )
         if analysis_result and isinstance(analysis_result, dict):
@@ -1242,7 +1274,7 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
     retrieved_chosen_persona_key = session["chosen_persona_key"]
 
     try:
-        tactic_key_for_this_turn, tactic_sel_justification = select_tactic_for_current_turn(
+        tactic_key_for_this_turn, tactic_sel_justification = await select_tactic_for_current_turn(
             GEMINI_MODEL,
             session["initial_user_profile_survey"],
             user_message,
@@ -1281,7 +1313,7 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
             print(f"--- DEBUG: AI Response Generation Attempt {attempt}/{max_retries} ---")
             attempt_start = time.time()
 
-            ai_response_text, researcher_notes, attempt_metadata = generate_ai_response(
+            ai_response_text, researcher_notes, attempt_metadata = await generate_ai_response(
                 GEMINI_MODEL,
                 user_message,
                 tactic_key_for_this_turn,
