@@ -690,7 +690,7 @@ def select_tactic_for_current_turn(
 
 def generate_ai_response(model, prompt:str, technique:Optional[str], user_profile:Dict, conversation_history:List[Dict], chosen_persona_key: str):
     if not GEMINI_PRO_MODEL or not GEMINI_FLASH_MODEL:
-        return "Error: AI models are not initialized.", "No researcher notes due to model init error."
+        return "Error: AI models are not initialized.", "No researcher notes due to model init error.", {"retry_attempts": 0, "retry_time": 0.0}
 
     readable_profile = convert_profile_to_readable(user_profile)
 
@@ -774,6 +774,8 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
     max_retries = 3
     retry_delay = 3  # seconds
     response = None
+    primary_retry_attempts = 0
+    primary_retry_time = 0.0
 
     for attempt in range(1, max_retries + 1):
         try:
@@ -786,6 +788,8 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
             if is_retryable_error(e):
                 if attempt < max_retries:
                     print(f"Retryable error in primary model AI response (attempt {attempt}/{max_retries}), retrying in {retry_delay}s: {str(e)[:200]}")
+                    primary_retry_attempts += 1
+                    primary_retry_time += retry_delay
                     time.sleep(retry_delay)
                     continue
                 else:
@@ -826,9 +830,9 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
             split_pos = match.start()
             user_text = full_text[:split_pos].strip()
             researcher_notes_section = full_text[match.end():].strip()
-            return user_text, researcher_notes_section
+            return user_text, researcher_notes_section, {"retry_attempts": primary_retry_attempts, "retry_time": primary_retry_time}
         else:
-            return full_text.strip(), "No researcher notes provided (keyword missing)."
+            return full_text.strip(), "No researcher notes provided (keyword missing).", {"retry_attempts": primary_retry_attempts, "retry_time": primary_retry_time}
 
     except Exception as e:
         # Enhanced Railway logging for primary model failure
@@ -846,6 +850,9 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
         
         # Retry logic for 504 errors on fallback model
         response_fallback = None
+        fallback_retry_attempts = 0
+        fallback_retry_time = 0.0
+
         for attempt_fallback in range(1, max_retries + 1):
             try:
                 # --- ATTEMPT: FALLBACK MODEL ---
@@ -857,6 +864,8 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
                 if is_retryable_error(e_fb):
                     if attempt_fallback < max_retries:
                         print(f"Retryable error in fallback model AI response (attempt {attempt_fallback}/{max_retries}), retrying in {retry_delay}s: {str(e_fb)[:200]}")
+                        fallback_retry_attempts += 1
+                        fallback_retry_time += retry_delay
                         time.sleep(retry_delay)
                         continue
                     else:
@@ -889,9 +898,13 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
                 researcher_notes_clean = full_text_fallback[match.end():].strip()
                 # Add a note for the researcher that a fallback occurred
                 researcher_notes_with_alert = f"{researcher_notes_clean}\n\n[RESEARCHER ALERT: This response was generated using the FALLBACK model due to a primary model error: {e}]"
-                return user_text, researcher_notes_with_alert
+                total_retries = primary_retry_attempts + fallback_retry_attempts
+                total_retry_time = primary_retry_time + fallback_retry_time
+                return user_text, researcher_notes_with_alert, {"retry_attempts": total_retries, "retry_time": total_retry_time}
             else:
-                return full_text_fallback.strip(), f"No researcher notes provided (keyword missing). [FALLBACK USED due to error: {e}]"
+                total_retries = primary_retry_attempts + fallback_retry_attempts
+                total_retry_time = primary_retry_time + fallback_retry_time
+                return full_text_fallback.strip(), f"No researcher notes provided (keyword missing). [FALLBACK USED due to error: {e}]", {"retry_attempts": total_retries, "retry_time": total_retry_time}
 
         except Exception as e_fallback:
             # --- BOTH MODELS FAILED ---
@@ -911,7 +924,9 @@ def generate_ai_response(model, prompt:str, technique:Optional[str], user_profil
             
             generic_response = "I literally don't know how to respond to that"
             researcher_notes = f"CRITICAL FAILURE: Both models failed. Primary Error: {e}. Fallback Error: {e_fallback}."
-            return generic_response, researcher_notes
+            total_retries = primary_retry_attempts + fallback_retry_attempts
+            total_retry_time = primary_retry_time + fallback_retry_time
+            return generic_response, researcher_notes, {"retry_attempts": total_retries, "retry_time": total_retry_time}
 
 def update_personality_vector(user_profile, new_data):
     for key, value in new_data.items():
@@ -1225,12 +1240,15 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
     max_retries = 3
     ai_response_text = None
     researcher_notes = None
-    
+    backend_retry_count = 0
+    backend_retry_time = 0.0
+
     for attempt in range(1, max_retries + 1):
         try:
             print(f"--- DEBUG: AI Response Generation Attempt {attempt}/{max_retries} ---")
-            
-            ai_response_text, researcher_notes = generate_ai_response(
+            attempt_start = time.time()
+
+            ai_response_text, researcher_notes, attempt_metadata = generate_ai_response(
                 GEMINI_MODEL,
                 user_message,
                 tactic_key_for_this_turn,
@@ -1238,7 +1256,11 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
                 simple_history_for_your_prompt,
                 retrieved_chosen_persona_key
             )
-            
+
+            # Track backend retries from this attempt
+            backend_retry_count += attempt_metadata.get("retry_attempts", 0)
+            backend_retry_time += attempt_metadata.get("retry_time", 0.0)
+
             # If we get here, generation succeeded
             print(f"--- DEBUG: AI Response Generation Succeeded on Attempt {attempt} ---")
             break
@@ -1270,6 +1292,7 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
                 
                 ai_response_text = "I literally don't know how to respond to that"
                 researcher_notes = f"CRITICAL: All {max_retries} AI generation attempts failed. Emergency response used. Final error: {str(e)}"
+                attempt_metadata = {"retry_attempts": 0, "retry_time": 0.0}
                 break
 
     ai_text_length = len(ai_response_text)
@@ -1356,7 +1379,11 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
     return {
         "ai_response": ai_response_text,
         "turn": current_ai_response_turn,
-        "timestamp": response_timestamp
+        "timestamp": response_timestamp,
+        "backend_retry_metadata": {
+            "retry_attempts": backend_retry_count,
+            "retry_time_seconds": backend_retry_time
+        }
     }
 
 @app.post("/log_conversation_start")
