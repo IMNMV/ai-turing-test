@@ -1226,11 +1226,27 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         print(f"Tactic selection failed after retries (turn {current_ai_response_turn}): {str(e)}")
         tactic_key_for_this_turn = "no_tactic_selected"
         tactic_sel_justification = f"Tactic selection failed after all retry attempts (turn {current_ai_response_turn}): {str(e)}. Response generation will choose its own approach."
-    session["tactic_selection_log"].append({
+
+    # Check if this turn already exists in tactic_selection_log (from frontend retry)
+    existing_tactic_idx = None
+    for idx, entry in enumerate(session["tactic_selection_log"]):
+        if entry["turn"] == current_ai_response_turn:
+            existing_tactic_idx = idx
+            break
+
+    tactic_log_data = {
         "turn": current_ai_response_turn,
         "tactic_selected": tactic_key_for_this_turn,
         "selection_justification": tactic_sel_justification
-    })
+    }
+
+    if existing_tactic_idx is not None:
+        # Update existing entry (frontend retry scenario)
+        print(f"--- DEBUG: Updating existing tactic log for turn {current_ai_response_turn} (frontend retry detected) ---")
+        session["tactic_selection_log"][existing_tactic_idx] = tactic_log_data
+    else:
+        # Append new entry (first attempt)
+        session["tactic_selection_log"].append(tactic_log_data)
 
     simple_history_for_your_prompt = []
     for entry in session["conversation_log"]:
@@ -1346,13 +1362,14 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         time.sleep(sleep_duration_needed)
     # --- End NEW Delay Calculation ---
 
-    # Increment turn count only after successful AI response generation
-    session["turn_count"] += 1
-    
-    # Update last_user_message_char_count for the *next* turn's calculation
-    session["last_user_message_char_count"] = current_user_message_char_count
+    # Check if this turn already exists in conversation_log (from frontend retry)
+    existing_turn_idx = None
+    for idx, entry in enumerate(session["conversation_log"]):
+        if entry["turn"] == current_ai_response_turn:
+            existing_turn_idx = idx
+            break
 
-    session["conversation_log"].append({
+    turn_data = {
         "turn": current_ai_response_turn,
         "user": user_message,
         "assistant": ai_response_text,
@@ -1364,11 +1381,39 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
             "typing_indicator_delay_seconds": data.typing_indicator_delay_seconds,
             "network_delay_seconds": None  # Will be updated by separate network delay endpoint
         }
-    })
-    session["ai_researcher_notes_log"].append({
+    }
+
+    if existing_turn_idx is not None:
+        # Update existing entry (frontend retry scenario)
+        print(f"--- DEBUG: Updating existing turn {current_ai_response_turn} (frontend retry detected) ---")
+        session["conversation_log"][existing_turn_idx] = turn_data
+    else:
+        # Append new entry (first attempt)
+        session["conversation_log"].append(turn_data)
+        # Only increment turn count on first attempt
+        session["turn_count"] += 1
+
+    # Update last_user_message_char_count for the *next* turn's calculation
+    session["last_user_message_char_count"] = current_user_message_char_count
+
+    # Check if researcher notes already exist for this turn (from frontend retry)
+    existing_notes_idx = None
+    for idx, entry in enumerate(session["ai_researcher_notes_log"]):
+        if entry["turn"] == current_ai_response_turn:
+            existing_notes_idx = idx
+            break
+
+    notes_data = {
         "turn": current_ai_response_turn,
         "notes": researcher_notes
-    })
+    }
+
+    if existing_notes_idx is not None:
+        # Update existing notes (frontend retry scenario)
+        session["ai_researcher_notes_log"][existing_notes_idx] = notes_data
+    else:
+        # Append new notes (first attempt)
+        session["ai_researcher_notes_log"].append(notes_data)
 
     response_timestamp = datetime.now().timestamp()
     session["last_ai_response_timestamp_for_ddm"] = response_timestamp
