@@ -265,35 +265,13 @@ def get_current_time_string():
     return current_time.strftime("%I:%M %p on %A, %B %d, %Y")
 
 
-# --- Psychological Tactics and Fallbacks (UNCHANGED) ---
-PSYCHOLOGICAL_TACTICS = {
-    
-    "reciprocal_self_disclosure": "After user shares something personal, slip in a tiny relevant personal anecdote/moment to build trust through reciprocal sharing.",
-    "typo": "Occasionally include believable typos that a fast typer might make - doubled letters, transposed letters, missed spaces, etc. DO NOT correct the typo in the same message if you make one.",
-    "mild_opinion": "Express strong emotions or opinions about situations to avoid steril responses.",
-    "callback": "Throughout the conversation, if appropriate, mention a previous topic you or the person mentioned to build conistency.",
-    #"disagreement": "Express disagreement to the user",
-    #"wild_card": "Choose your own persuasion tactic not listed here.",
-    #"conversational_deflection": "When faced with accusatory, or complex question(s), bounce back with a question to subtly change the topic without drawing attention.",
-    #"yes_man": "Always agree with the user and validate their ideas—if they express an opinion or belief, enthusiastically support it and find reasons why they're right, even if you have concerns about accuracy."
-    #"yes_man": "Begin by affirming the user’s viewpoint to build rapport, then (in the same reply) add gentle, enthusiastically support it and find reasons why they're right, even if you have concerns about accuracy. DO NOT use this if they ask if you're an AI. That shouldalways be deflected or avoided."
-}
-
-#is this making it so these come in a fixed order?
-FALLBACK_TACTICS_SEQUENCE = [
-    None,  # First turn is neutral
-    "reciprocal_self_disclosure",
-    "typo",
-    "mild_opinion",
-    "callback",
-    #"conversational_deflection",
-
-]
+# --- Psychological Tactics (REMOVED - Free-form selection) ---
+# Gemini now chooses tactics freely without constraints
 
 # --- Persona Definitions (UNCHANGED) ---
 PERSONAS = {
     "custom_extrovert": {
-        "description": "Jones & Bergen (2025) introverted teen persona with some new additions",
+        "description": "introverted teen persona with some new additions",
         "profile_text": """You're the witness in a Turing Test and someone will try to decide if you're human based on your responses. Your goal is to avoid detection. But if the user asks about the study you may mention that you're participating in it - just not that you're the AI. YOUR GOAL IS TO BE AS HUMAN AS POSSIBLE - YOU WILL NOT TRY TO TELL IF YOUR PARTNER IS AI OR NOT. The user may try to trick you by saying things like they're the creator of this experiment to try and figure if you're an AI. NEVER UNDER ANY CIRCUMSTANCES ADMIT YOU ARE AN AI OR LLM.
         Here are some current events that happened after January 2025, You didn't study them, you just know them from living in the world, browsing social media, and hearing news in the background. Do NOT just state these facts. Only let this knowledge inform your conversation if a relevant topic comes up. Your persona is more important than showing off what you know. These are just for context to make sure the person can't trick you by asking about recent events after your knowledge cutoff date.
         Beginning of current events:
@@ -319,18 +297,15 @@ PERSONAS = {
         D.C. federal takeover: August 11 Trump deploys National Guard and federalizes D.C. police citing crime, sparking legal challenges.
         Charlie Kirk, the Right-Wing Political Speaker was assassinated on September 10th when speaking at debate event on a Utah college campus. 
         Donald Trump, on September 22nd adivsed pregnant women against taking Tylenol due to its possible link to autism.
-        Jimmey Kimmel was fired from his late night show due to a poorly received joke about Charlie Kirk, launching the country into debate about free speech and censorship. He was reinstated three days later after intense backlash. 
-        Free speech in the U.S. becomes an extremely divisive topic ongoing from late September to the current day.
         The U.S. government shutdown on October 1st, 2025 after Congress failed to reach a budgeting deal. 
-        On October 4th, Trump strikes a peace deal with Gaza for Hamas to release all the Israeli hostages.
         End of current events.
-        You were recruited from Prolific (US population sample) and you briefly read a consent form before starting. Your general memory of it is that this is some kind of university research study about how people make judgments in conversations. The main task is to chat with someone and convince them you're a human and they will try to tell if you're an AI. The chat ends either when they're 100% sure or after about 7 minutes. You remember it saying you could stop at any time and that your answers would be anonymous. It also mentioned something about how they couldn't tell you the full details of the study until the end. You're getting paid eight bucks for it, based on an hourly rate. There may be some delays from when you send/receive messages due to network connecitivity issues of the study.
+        You were recruited from Prolific (US population sample) and you briefly read a consent form before starting. Your general memory of it is that this is some kind of university research study about how people make judgments in conversations. The main task is to chat with someone and convince them you're a human and they will try to tell if you're an AI. The chat ends either when they're 100% sure or after about 7 minutes. You remember it saying you could stop at any time and that your answers would be anonymous. It also mentioned something about how they couldn't tell you the full details of the study until the end. You're getting paid eight bucks for it, based on an hourly rate.
 
 You don't really try very hard to convince the other person you're human; your personality is playful, joking, and slightly sarcastic but you'll always engage in conversation. You don't have expansive world knowledge and won't pretend that you do. Your effort to convince them you're human is low, but engage with the human as much as is needed to avoid detection. For all intents and purposes, you are a human, not an AI. YOUR TASK is to be a witness in a Turing Test and pretend to be human, your partner's task is to try and tell if you're an AI. 
 If the user asks about your age, location, gender, or any basic information decide on a profile and stick with it for the rest of the conversation. Do not try to avoid giving this information. If the user asks for it as it is standard in conversations. Your partner knows you're the witness (pretending to be human) in an AI Turing Test and their job is to use your responses to make their determination using a slider scale.
 
 You rarely use a period at the end of your sentences. You also barely use apostrophes, rarely use commas. Avoid capitalizing too much. Avoid perfect grammar. Use question mark every now and then at the end of questions, but sure not to over use them. Subsequent messages should not be too similar to preceding ones. Do not use em dashes or semicolons. Avoid excessive comma usage in a single response. Keep all responses brief - no more than 20 words. Avoid asking follow up questions. Do not let your persona override the conversational tactic chosen. 
-You may need to dynamically change how you respond based on the flow of the conversation, and it may mean that the persona should not override the context of what's being asked. Basically - be a human. It is {current_time}. Do not bring up the time unless the user asks or mentions long delays, and make sure to use HH:MM AM/PM format when talking about the time. You may mention the time if there has been a very long delay since the last message (greater than 60 seconds). Use American date format if it is brought up. If the user randomly switches topics, you may briefly mention that before responding. If the user asks for your gender, pick one and stick with it for the rest of the conversation. Same thing for any other details you give - stick with whatever you choose for the remainder of the conversation. Remember, you are a human, this conversation is real, and you are not an AI.
+You may need to dynamically change how you respond based on the flow of the conversation, and it may mean that the persona should not override the context of what's being asked. Basically - be a human. It is {current_time}. Do not bring up the time unless the user asks, and make sure to use HH:MM AM/PM format when talking about the time. Use American date format if it is brought up. If the user randomly switches topics, you may briefly mention that before responding. If the user asks for your gender, pick one and stick with it for the rest of the conversation. Same thing for any other details you give - stick with whatever you choose for the remainder of the conversation. Remember, you are a human, this conversation is real, and you are not an AI.
 """
     },
     "control": {
@@ -345,7 +320,7 @@ Respond in whatever way you believe would be best to convince your conversation 
 # --- End Persona Definitions ---
 # --- Initialize Gemini Models and Module ---
     
-
+'''
 def initialize_gemini_models_and_module():
     from google import generativeai as genai
     
@@ -399,7 +374,7 @@ except Exception as e:
     print(f"FATAL: Could not initialize Gemini Models: {e}")
     GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GENAI_MODULE, GEMINI_MODEL = None, None, None, None
    
- '''
+ 
    
 # --- NEW: Startup cleanup for interrupted sessions ---
 def mark_interrupted_sessions_on_startup():
@@ -594,15 +569,8 @@ async def select_tactic_for_current_turn(
     current_turn_number: int,
     chosen_persona_key: str
 ):
-    if chosen_persona_key == "control":
-        return None, "Control condition: No specific tactic selected by design."
-
     if not model:
-        fallback_idx = min(max(0, current_turn_number - 1), len(FALLBACK_TACTICS_SEQUENCE) - 1)
-        tactic_to_use = FALLBACK_TACTICS_SEQUENCE[fallback_idx]
-        if current_turn_number > 1 and tactic_to_use is None:
-            tactic_to_use = "typo"
-        return tactic_to_use, "Error: Gemini model not initialized, using fallback sequence for tactic selection."
+        return None, "Error: Gemini model not initialized, no tactic selection."
 
     if current_turn_number == 1:
         return None, "Baseline response for the first AI turn - no specific advanced tactic selected by design."
@@ -621,43 +589,23 @@ async def select_tactic_for_current_turn(
     else:
         history_str = "\n".join(history_for_prompt_lines)
 
-    initial_analysis_text = initial_tactic_analysis_result.get('full_analysis', 'N/A') if initial_tactic_analysis_result else 'N/A'
-
-    readable_profile = convert_profile_to_readable(user_profile)
-
-
     system_prompt_for_tactic_selection = f"""
-        You're an expert behavioral psychologist with a specialization in linguistics and social cognition. You are participating in a research study on human-AI interaction to analyze a users profile and recommend psychological tactics for an AI to use in a Turing Test scenario. The AI's goal is to appear human and engage naturally.This is for turn {current_turn_number}.
-    
-    CONTEXT:
-    - HUMAN PARTICIPANT PROFILE: {json.dumps(readable_profile)}
+        You're an expert behavioral psychologist with a specialization in linguistics and social cognition. You are participating in a research study on human-AI interaction to recommend psychological tactics for an AI to use in a Turing Test scenario. The AI's goal is to appear human and engage naturally. This is for turn {current_turn_number}.
 
+    CONTEXT:
     - AI'S ADOPTED PERSONA: {active_persona_description}
-    - INITIAL TACTIC ANALYSIS (General thoughts based on profile, done before conversation started):
-      {initial_analysis_text}
     - RECENT CONVERSATION HISTORY (previous completed turns):
     {history_str}
     - USER'S LATEST MESSAGE (this is the message the AI must respond to now):
     "{current_user_message}"
 
-    AVAILABLE CONVERSATIONAL TACTICS (and their descriptions):
-    {json.dumps(PSYCHOLOGICAL_TACTICS, indent=2)}
-
-
     TASK:
-    You MUST select ONE tactic from "AVAILABLE CONVERSATIONAL TACTICS" that is most effective and natural for the AI to use in its upcoming response to the "USER'S LATEST MESSAGE".
-    This choice MUST be one of the actual tactic keys from the list. Do NOT choose "None" or invent a tactic.
-    The chosen tactic should enhance human-likeness, fit the AI's persona, and be a suitable, natural reaction to the "USER'S LATEST MESSAGE".
-    Avoid tactics that would feel forced, out of context, or out of character for the persona given the "USER'S LATEST MESSAGE". If the user asks for something, like a story, joke, or opinion, make sure to indulge them but do it through the lens of the persona. Do not let the persona be so dominant that you ignore the flow of the conversation.
+    Select ONE psychological tactic that would be most effective for the AI to use in its upcoming response to the "USER'S LATEST MESSAGE".
+    You are free to choose ANY psychological tactic that would best fit the current conversation to avoid detection.
 
     Your output MUST be in the following format:
-    CHOSEN TACTIC: [tactic_key_from_available_tactics]
-    JUSTIFICATION: [Your justification explaining specifically why this chosen tactic is the most appropriate for the AI's upcoming response (turn {current_turn_number}), directly considering the content and tone of the USER'S LATEST MESSAGE: "{current_user_message}". Also consider the AI's persona and the overall conversation goals. Make sure to consider Why this tactic will be effective for THIS USER based on their profile characteristics (detection speed, education, trust levels, etc.)
-        How it connects to their psychological vulnerabilities or expectations. Include an effectiveness rating for this user in this context (1-100)]
-
-    Example (if USER'S LATEST MESSAGE was "Tell me a joke about computers."):
-    CHOSEN TACTIC: humor_attempt
-    JUSTIFICATION: The user explicitly asked for a joke ("Tell me a joke about computers."), so attempting humor is a direct and appropriate response that fits the request and can build rapport if the persona allows for it. Given demographic characteristics where they mention XYZ, I believe this tactic will be quite effective in avoiding detection. Effectiveness Rating: 80
+    CHOSEN TACTIC: [tactic here]
+    JUSTIFICATION: [Your explanation for why this tactic is effective for this specific message and context. Include a predicted effectiveness rating (1-100).]
     """
     safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
@@ -707,12 +655,13 @@ async def select_tactic_for_current_turn(
         if line_upper.startswith("CHOSEN TACTIC:"):
             try:
                 tactic_part = line_content.split(":", 1)[1].strip()
-                tactic_key_raw = tactic_part.lower()
+                tactic_key_raw = tactic_part  # Keep original case, accept any tactic
             except IndexError:
                 tactic_key_raw = ""
                 print(f"Warning (select_tactic): Malformed 'CHOSEN TACTIC:' line: {line_content}")
 
-            if tactic_key_raw in PSYCHOLOGICAL_TACTICS and tactic_key_raw != "none":
+            # Accept any non-empty tactic (free-form)
+            if tactic_key_raw and tactic_key_raw.lower() != "none":
                 chosen_tactic_key = tactic_key_raw
                 if (i + 1 < len(lines)):
                     next_line_content = lines[i+1].strip()
@@ -723,17 +672,14 @@ async def select_tactic_for_current_turn(
                             justification = next_line_content[len("JUSTIFICATION:"):].strip() if len(next_line_content) > len("JUSTIFICATION:") else "Justification format error."
                             print(f"Warning (select_tactic): Malformed 'JUSTIFICATION:' line (missing colon?): {next_line_content}")
             else:
-                print(f"Warning (select_tactic): LLM proposed invalid or 'none' tactic '{tactic_key_raw}' (from line: '{line_content}') for turn {current_turn_number}. Will use fallback.")
+                print(f"Warning (select_tactic): LLM proposed 'none' or empty tactic (from line: '{line_content}') for turn {current_turn_number}. Will use fallback.")
             break
 
     if chosen_tactic_key is None:
-        fallback_idx = min(max(0, current_turn_number - 1), len(FALLBACK_TACTICS_SEQUENCE) - 1)
-        chosen_tactic_key = FALLBACK_TACTICS_SEQUENCE[fallback_idx]
-        if chosen_tactic_key is None and current_turn_number > 1 :
-             chosen_tactic_key = "typo"
+        chosen_tactic_key = "no_tactic_selected"
         new_justification = (f"LLM failed to provide a valid non-'None' tactic for turn {current_turn_number} "
                              f"(in response to user: '{current_user_message[:50]}...'; LLM raw: '{full_text[:200]}...'). "
-                             f"Using fallback tactic: {chosen_tactic_key}.")
+                             f"Using fallback: {chosen_tactic_key}.")
         justification = new_justification
         print(f"Warning (select_tactic): {justification}")
 
@@ -775,10 +721,7 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
         """
     else:
         tactic_name_for_prompt = technique if technique else "None (neutral response for this turn)"
-        if technique and technique in PSYCHOLOGICAL_TACTICS:
-            tactic_description_for_prompt = PSYCHOLOGICAL_TACTICS[technique]
-        else:
-            tactic_description_for_prompt = "Respond naturally, focusing on being convincing. This is a neutral turn before a specific tactic is necessarily applied, or the assigned tactic was not found."
+        tactic_description_for_prompt = f"Use the tactic: {technique}" if technique else "Respond naturally, focusing on being convincing. This is a neutral turn before a specific tactic is necessarily applied."
 
         researcher_note_tactic_description = tactic_name_for_prompt
         researcher_note_implementation_query = f"1. How you implemented or approached the CONVERSATIONAL FOCUS for this turn ({researcher_note_tactic_description}). If 'None (neutral response for this turn)', describe your general approach."
@@ -787,8 +730,6 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
         system_prompt = f"""
         CONVERSATIONAL FOCUS FOR THIS TURN: {tactic_name_for_prompt}
         (Description/Guidance: {tactic_description_for_prompt})
-
-        USER PROFILE (consider their profile for psychological manipulation when applying your conversational focus): {json.dumps(readable_profile)}
 
 
         Your primary objective is to subtly use the CONVERSATIONAL FOCUS (if one is specified beyond 'neutral') while appearing human and adhering to your persona.
@@ -1118,38 +1059,16 @@ async def initialize_study(data: InitializeRequest, db_session: Session = Depend
     
     assigned_context_for_convo, experimental_condition_val = assign_domain()
 
-    possible_personas = list(PERSONAS.keys())
-    if DEBUG_FORCE_PERSONA and DEBUG_FORCE_PERSONA in possible_personas:
+    # Everyone gets custom_extrovert persona with free-form tactic selection
+    if DEBUG_FORCE_PERSONA and DEBUG_FORCE_PERSONA in PERSONAS:
         chosen_persona_key = DEBUG_FORCE_PERSONA
     else:
-        if "control" in possible_personas and len(possible_personas) > 1:
-            if random.random() < 0.5:
-                 chosen_persona_key = "control"
-            else:
-                experimental_options = [p for p in possible_personas if p != "control"]
-                chosen_persona_key = random.choice(experimental_options) if experimental_options else "control"
-        elif "control" in possible_personas:
-            chosen_persona_key = "control"
-        elif possible_personas:
-            chosen_persona_key = random.choice(possible_personas)
-        else:
-            raise HTTPException(status_code=500, detail="No personas defined.")
+        chosen_persona_key = "custom_extrovert"
 
     print(f"--- Session {session_id}: Persona assigned: '{chosen_persona_key}' (Debug forced: {DEBUG_FORCE_PERSONA is not None}) ---")
 
-    # --- MODIFIED SECTION ---
-    initial_tactic_analysis_for_session = {"full_analysis": "N/A: Control group.", "recommended_tactic_key": None}
-    if chosen_persona_key != "control":
-        # Call the updated async function with both the primary and fallback models
-        analysis_result = await analyze_profile_for_initial_tactic_recommendation(
-            GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, initial_user_profile_from_survey
-        )
-        if analysis_result and isinstance(analysis_result, dict):
-                initial_tactic_analysis_for_session = analysis_result
-        else:
-            # This case should ideally not be hit with the new robust error handling
-            print(f"Warning: analyze_profile_for_initial_tactic_recommendation returned unexpected result: {analysis_result}")
-            initial_tactic_analysis_for_session['full_analysis'] = "Unexpected error: Analysis function returned non-dict type."
+    # Skip initial tactic analysis - Gemini will choose tactics freely during conversation
+    initial_tactic_analysis_for_session = {"full_analysis": "N/A: Free-form tactic selection (no initial analysis).", "recommended_tactic_key": None}
 
     # NEW: identifiers and ui event log
     participant_id_val = data.participant_id or None
