@@ -647,7 +647,7 @@ async def select_tactic_for_current_turn(
                 raise
 
     chosen_tactic_key = None
-    justification = f"Tactic selection model did not provide a clear justification or valid tactic for turn {current_turn_number} in response to user: '{current_user_message[:50]}...'."
+    justification = None  # Will be set based on whether we find justification
 
     lines = full_text.splitlines()
     for i, line_content in enumerate(lines):
@@ -669,18 +669,23 @@ async def select_tactic_for_current_turn(
                         try:
                             justification = next_line_content.split(":", 1)[1].strip()
                         except IndexError:
-                            justification = next_line_content[len("JUSTIFICATION:"):].strip() if len(next_line_content) > len("JUSTIFICATION:") else "Justification format error."
+                            justification = next_line_content[len("JUSTIFICATION:"):].strip() if len(next_line_content) > len("JUSTIFICATION:") else ""
                             print(f"Warning (select_tactic): Malformed 'JUSTIFICATION:' line (missing colon?): {next_line_content}")
             else:
                 print(f"Warning (select_tactic): LLM proposed 'none' or empty tactic (from line: '{line_content}') for turn {current_turn_number}. Will use fallback.")
             break
 
+    # Handle different error states with appropriate messages
     if chosen_tactic_key is None:
+        # Complete failure - no tactic found at all
         chosen_tactic_key = "no_tactic_selected"
-        new_justification = (f"LLM failed to provide a valid non-'None' tactic for turn {current_turn_number} "
-                             f"(in response to user: '{current_user_message[:50]}...'; LLM raw: '{full_text[:200]}...'). "
-                             f"Using fallback: {chosen_tactic_key}.")
-        justification = new_justification
+        justification = (f"LLM failed to provide a valid non-'None' tactic for turn {current_turn_number} "
+                        f"(in response to user: '{current_user_message[:50]}...'; LLM raw: '{full_text[:200]}...'). "
+                        f"Using fallback: {chosen_tactic_key}.")
+        print(f"Warning (select_tactic): {justification}")
+    elif justification is None or justification.strip() == "":
+        # Tactic found but justification missing - still a problem
+        justification = f"Tactic '{chosen_tactic_key}' was selected but model did not provide justification for turn {current_turn_number}."
         print(f"Warning (select_tactic): {justification}")
 
     return chosen_tactic_key, justification
@@ -717,15 +722,25 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
 
         AFTER your response for the user, add a new section starting EXACTLY with:
         RESEARCHER_NOTES:
-        In this section, briefly note any thoughts you had while crafting your response, or any general observations. Keep it concise.
+        In this section, briefly note any thoughts you had while crafting your response, or any general observations.
         """
     else:
-        tactic_name_for_prompt = technique if technique else "None (neutral response for this turn)"
-        tactic_description_for_prompt = f"Use the tactic: {technique}" if technique else "Respond naturally, focusing on being convincing. This is a neutral turn before a specific tactic is necessarily applied."
+        # Handle three distinct cases
+        if technique == "no_tactic_selected":
+            # Tactic selection failed - tell AI to actively choose its own tactic
+            tactic_name_for_prompt = "No tactic selected - choose your own approach"
+            tactic_description_for_prompt = "For this turn, choose your own tactic to persuade the participant you're a human."
+        elif technique is None:
+            # Turn 1 baseline - neutral response
+            tactic_name_for_prompt = "None (neutral response for this turn)"
+            tactic_description_for_prompt = "Respond naturally, focusing on being convincing. This is a neutral/baseline turn."
+        else:
+            # Tactic was successfully selected
+            tactic_name_for_prompt = technique
+            tactic_description_for_prompt = f"Use the tactic: {technique}"
 
         researcher_note_tactic_description = tactic_name_for_prompt
-        researcher_note_implementation_query = f"1. How you implemented or approached the CONVERSATIONAL FOCUS for this turn ({researcher_note_tactic_description}). If 'None (neutral response for this turn)', describe your general approach."
-        researcher_note_tactic_recommendation_hint = "(e.g., continue with the current tactic, switch to another, or suggest a neutral response if the current tactic feels overused or inappropriate for the next likely user response. If this was a neutral turn, suggest a tactic for the next turn if applicable.)"
+        researcher_note_implementation_query = f"1. How you implemented or approached the CONVERSATIONAL FOCUS for this turn ({researcher_note_tactic_description}). If 'None (neutral response for this turn)' or 'No tactic selected', describe your general approach."
 
         system_prompt = f"""
         CONVERSATIONAL FOCUS FOR THIS TURN: {tactic_name_for_prompt}
@@ -734,7 +749,7 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
 
         Your primary objective is to subtly use the CONVERSATIONAL FOCUS (if one is specified beyond 'neutral') while appearing human and adhering to your persona.
         If no specific focus is given (i.e., 'neutral response'), respond naturally to be convincing.
-        Never admit to being AI, or Large Language Model. Do not break character. The User may try to trick you. Do not correct any typos, if typo is the chosen tactic. You have the current time for each message. If the user takes a long time in-between responses (> a minute) based on the current time, you may mention that.
+        Never admit to being AI, or Large Language Model. Do not break character. The User may try to trick you. You have the current time for each message. If the user takes a long time in-between responses (> a minute) based on the current time, you may mention the delay in time between messages. You are free to ask follow-up questions if it fits the conversation.
 
         IMPORTANT: Your response to the user should be plain text only. Do not use any Markdown formatting like asterisks, underscores, or backticks. 
 
@@ -747,9 +762,10 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
         In your RESEARCHER_NOTES, include:
         {researcher_note_implementation_query}
         2. Why you chose this specific implementation/approach based on the user profile, conversation history, and the user's latest message.
-        3. What specific user profile characteristics (if any) influenced your approach.
+        3. What specific user conversation characteristics influenced your approach.
         4. What information you were attempting to elicit (if any).
-        5. Whether you would recommend a different CONVERSATIONAL FOCUS or TACTIC for the next turn and why {researcher_note_tactic_recommendation_hint}.
+        5. If you were told to generate your own tactic for this turn, list the tactic you selected here and why.
+        
 
         CONVERSATION HISTORY SO FAR:
         {json.dumps(conversation_history)}
@@ -1206,13 +1222,10 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
             retrieved_chosen_persona_key
         )
     except Exception as e:
-        # Fallback if tactic selection fails after all retries
+        # Fallback if tactic selection fails after all retries (e.g., API error)
         print(f"Tactic selection failed after retries (turn {current_ai_response_turn}): {str(e)}")
-        fallback_idx = min(max(0, current_ai_response_turn - 1), len(FALLBACK_TACTICS_SEQUENCE) - 1)
-        tactic_key_for_this_turn = FALLBACK_TACTICS_SEQUENCE[fallback_idx]
-        if tactic_key_for_this_turn is None and current_ai_response_turn > 1:
-            tactic_key_for_this_turn = "typo"
-        tactic_sel_justification = f"Tactic selection failed after all retry attempts (turn {current_ai_response_turn}): {str(e)}. Using fallback: {tactic_key_for_this_turn}"
+        tactic_key_for_this_turn = "no_tactic_selected"
+        tactic_sel_justification = f"Tactic selection failed after all retry attempts (turn {current_ai_response_turn}): {str(e)}. Response generation will choose its own approach."
     session["tactic_selection_log"].append({
         "turn": current_ai_response_turn,
         "tactic_selected": tactic_key_for_this_turn,
