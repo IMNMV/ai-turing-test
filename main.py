@@ -603,7 +603,7 @@ async def select_tactic_for_current_turn(
     Select ONE psychological tactic that would be most effective for the AI to use in its upcoming response to the "USER'S LATEST MESSAGE".
     You are free to choose ANY psychological tactic that would best fit the current conversation to avoid detection.
 
-    Your output MUST be in the following format:
+    Your output MUST be in the following format DO NOT deviate from it ever:
     CHOSEN TACTIC: [tactic here]
     JUSTIFICATION: [Your explanation for why this tactic is effective for this specific message and context. Include a predicted effectiveness rating (1-100).]
     """
