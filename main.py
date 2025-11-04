@@ -1465,6 +1465,26 @@ async def update_network_delay(data: NetworkDelayUpdateRequest, db_session: Sess
 
     session = sessions[session_id]
 
+    # NEW: Check for excessive network delay (>40 seconds)
+    EXCESSIVE_DELAY_THRESHOLD = 40.0
+    is_excessive_delay = data.network_delay_seconds > EXCESSIVE_DELAY_THRESHOLD
+
+    if is_excessive_delay:
+        print("=" * 60)
+        print("WARNING: EXCESSIVE NETWORK DELAY DETECTED")
+        print("=" * 60)
+        print(f"Session ID: {session_id}")
+        print(f"Turn: {data.turn}")
+        print(f"Network Delay: {data.network_delay_seconds:.2f} seconds")
+        print(f"Send Attempts: {data.send_attempts}")
+        print(f"Threshold: {EXCESSIVE_DELAY_THRESHOLD} seconds")
+        print(f"Overage: {data.network_delay_seconds - EXCESSIVE_DELAY_THRESHOLD:.2f} seconds")
+        print("This may indicate network issues or Railway cold starts")
+        print("=" * 60)
+
+        # Flag the session as having excessive delays
+        session["has_excessive_delays"] = True
+
     # Find the conversation turn and update its network delay
     turn_found = False
     for turn_data in session["conversation_log"]:
@@ -1473,13 +1493,14 @@ async def update_network_delay(data: NetworkDelayUpdateRequest, db_session: Sess
             if "timing" in turn_data:
                 turn_data["timing"]["network_delay_seconds"] = data.network_delay_seconds
                 turn_data["timing"]["send_attempts"] = data.send_attempts
+                turn_data["timing"]["excessive_delay_flag"] = is_excessive_delay  # NEW: Flag this turn
 
                 # Add network delay metadata if provided
                 if data.metadata:
                     turn_data["timing"]["network_delay_metadata"] = data.metadata
-                    print(f"Updated network delay for session {session_id}, turn {data.turn}: {data.network_delay_seconds}s, attempts: {data.send_attempts}, metadata: {data.metadata.get('status', 'unknown')}")
+                    print(f"Updated network delay for session {session_id}, turn {data.turn}: {data.network_delay_seconds}s, attempts: {data.send_attempts}, metadata: {data.metadata.get('status', 'unknown')}, excessive={is_excessive_delay}")
                 else:
-                    print(f"Updated network delay for session {session_id}, turn {data.turn}: {data.network_delay_seconds}s, attempts: {data.send_attempts}")
+                    print(f"Updated network delay for session {session_id}, turn {data.turn}: {data.network_delay_seconds}s, attempts: {data.send_attempts}, excessive={is_excessive_delay}")
 
                 break  # Exit loop once turn is found and updated
 
@@ -1490,6 +1511,14 @@ async def update_network_delay(data: NetworkDelayUpdateRequest, db_session: Sess
     # This is less critical data, so we don't want to fail the entire request if DB is slow
     try:
         update_session_after_message(session, db_session)
+
+        # NEW: If excessive delay detected, also update the has_excessive_delays flag in database
+        if is_excessive_delay:
+            session_record = db_session.query(db.StudySession).filter(db.StudySession.id == session_id).first()
+            if session_record:
+                session_record.has_excessive_delays = True
+                db_session.commit()
+
     except Exception as db_error:
         # Log the database error but don't fail the request
         print(f"Warning: Database update failed for network delay (session {session_id}, turn {data.turn}): {db_error}")
