@@ -326,7 +326,7 @@ Respond in whatever way you believe would be best to convince your conversation 
 # --- End Persona Definitions ---
 # --- Initialize Gemini Models and Module ---
     
-'''
+
 def initialize_gemini_models_and_module():
     from google import generativeai as genai
     
@@ -380,7 +380,7 @@ except Exception as e:
     print(f"FATAL: Could not initialize Gemini Models: {e}")
     GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GENAI_MODULE, GEMINI_MODEL = None, None, None, None
    
- 
+ '''
    
 # --- NEW: Startup cleanup for interrupted sessions ---
 def mark_interrupted_sessions_on_startup():
