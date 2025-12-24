@@ -326,7 +326,7 @@ Respond in whatever way you believe would be best to convince your conversation 
 # --- End Persona Definitions ---
 # --- Initialize Gemini Models and Module ---
     
-
+'''
 def initialize_gemini_models_and_module():
     from google import generativeai as genai
     
@@ -338,7 +338,9 @@ def initialize_gemini_models_and_module():
     )
     
     # Initialize the primary, more powerful model
-    primary_model = genai.GenerativeModel('gemini-2.5-flash')
+    primary_model = genai.GenerativeModel('gemini-3-flash-preview')
+    #primary_model = genai.GenerativeModel('gemini-2.5-flash')
+
     # new live model for chatbots
     #gemini-live-2.5-flash-preview
     # legacy model
@@ -356,14 +358,16 @@ try:
 except Exception as e:
     print(f"FATAL: Could not initialize Gemini Models: {e}")
     GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GENAI_MODULE, GEMINI_MODEL = None, None, None, None
-
 '''
+
 def initialize_gemini_models_and_module():
     from google import generativeai as genai
     genai.configure(api_key=API_KEY)
     
     # Initialize the primary, more powerful model
-    primary_model = genai.GenerativeModel('gemini-2.5-flash')
+    #primary_model = genai.GenerativeModel('gemini-2.5-flash')
+    primary_model = genai.GenerativeModel('gemini-3-flash-preview')
+
     #primary_model = genai.GenerativeModel('gemini-2.0-flash')
 
     
@@ -380,7 +384,7 @@ except Exception as e:
     print(f"FATAL: Could not initialize Gemini Models: {e}")
     GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GENAI_MODULE, GEMINI_MODEL = None, None, None, None
    
- '''
+ 
    
 # --- NEW: Startup cleanup for interrupted sessions ---
 def mark_interrupted_sessions_on_startup():
