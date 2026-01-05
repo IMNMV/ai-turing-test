@@ -65,6 +65,10 @@ class StudySession(Base):
     session_status = Column(String, default="active", index=True)  # active, completed, interrupted - indexed for faster queries
     last_updated = Column(DateTime, default=datetime.utcnow, index=True)  # Track when session was last updated - indexed for queries
     recovered_from_restart = Column(Boolean, default=False)  # Flag if session continued after Railway restart
+    # NEW: Binary choice tracking
+    final_binary_choice = Column(String, nullable=True)  # 'human' or 'ai' - final decision at time expiry
+    final_confidence_percent = Column(Integer, nullable=True)  # 0-100 confidence in final choice
+    has_excessive_delays = Column(Boolean, default=False)  # Flag if session had network delays >40s
 
 
 Base.metadata.create_all(bind=engine)
