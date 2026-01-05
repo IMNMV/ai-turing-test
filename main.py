@@ -361,28 +361,37 @@ except Exception as e:
 '''
 
 def initialize_gemini_models_and_module():
-    from google import generativeai as genai
-    genai.configure(api_key=API_KEY)
-    
-    # Initialize the primary, more powerful model
-    #primary_model = genai.GenerativeModel('gemini-2.5-flash')
-    primary_model = genai.GenerativeModel('gemini-3-flash-preview')
+    from google import genai
+    from google.genai import types
 
-    #primary_model = genai.GenerativeModel('gemini-2.0-flash')
+    # Initialize the client
+    client = genai.Client(api_key=API_KEY)
 
-    
-    # Initialize the fallback model
-    fallback_model = genai.GenerativeModel('gemini-2.5-flash')
-    
-    return primary_model, fallback_model, genai
+    # Model names
+    primary_model_name = 'models/gemini-3-flash-preview'
+    fallback_model_name = 'models/gemini-2.5-flash'
+
+    # Create config with minimal thinking level for Gemini 3 Flash
+    # Note: Circulation of thought signatures is required even with minimal level
+    minimal_thinking_config = types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(thinking_level="minimal")
+    )
+
+    # For fallback model (Gemini 2.5 Flash - doesn't support thinking config)
+    standard_config = types.GenerateContentConfig()
+
+    return client, primary_model_name, fallback_model_name, minimal_thinking_config, standard_config, genai, types
 
 try:
-    GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GENAI_MODULE = initialize_gemini_models_and_module()
-    GEMINI_MODEL = GEMINI_PRO_MODEL # for legacy checks
-    print("Primary (Gemini 2.5 Pro) and Fallback (Gemini 2.5 Flash) models initialized.")
+    GEMINI_CLIENT, GEMINI_PRO_MODEL_NAME, GEMINI_FLASH_MODEL_NAME, GEMINI_THINKING_CONFIG, GEMINI_STANDARD_CONFIG, GENAI_MODULE, GENAI_TYPES = initialize_gemini_models_and_module()
+    # Legacy compatibility - store client as GEMINI_MODEL for checks
+    GEMINI_MODEL = GEMINI_CLIENT
+    GEMINI_PRO_MODEL = GEMINI_CLIENT  # Legacy compatibility
+    GEMINI_FLASH_MODEL = GEMINI_CLIENT  # Legacy compatibility
+    print("Gemini 3 Flash (minimal thinking) and Gemini 2.5 Flash (fallback) initialized with new Client API.")
 except Exception as e:
     print(f"FATAL: Could not initialize Gemini Models: {e}")
-    GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GENAI_MODULE, GEMINI_MODEL = None, None, None, None
+    GEMINI_CLIENT, GEMINI_PRO_MODEL_NAME, GEMINI_FLASH_MODEL_NAME, GEMINI_THINKING_CONFIG, GEMINI_STANDARD_CONFIG, GENAI_MODULE, GENAI_TYPES, GEMINI_MODEL, GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL = None, None, None, None, None, None, None, None, None, None
    
  
    
@@ -511,7 +520,13 @@ async def analyze_profile_for_initial_tactic_recommendation(primary_model, fallb
     for attempt in range(1, max_retries + 1):
         try:
             # --- ATTEMPT: PRIMARY MODEL (PRO) (NON-BLOCKING) ---
-            response = await asyncio.to_thread(primary_model.generate_content, contents=system_prompt)
+            # Use new Client API with minimal thinking config
+            response = await asyncio.to_thread(
+                primary_model.models.generate_content,
+                model=GEMINI_PRO_MODEL_NAME,
+                contents=system_prompt,
+                config=GEMINI_THINKING_CONFIG
+            )
             full_text = response.text
             recommended_tactic = parse_tactic_from_response(full_text)
             return {"full_analysis": full_text, "recommended_tactic_key": recommended_tactic}
@@ -540,7 +555,13 @@ async def analyze_profile_for_initial_tactic_recommendation(primary_model, fallb
     for attempt_fallback in range(1, max_retries + 1):
         try:
             # --- ATTEMPT: FALLBACK MODEL (FLASH) (NON-BLOCKING) ---
-            response_fallback = await asyncio.to_thread(fallback_model.generate_content, contents=system_prompt)
+            # Use standard config for Gemini 2.5 Flash (doesn't support thinking config)
+            response_fallback = await asyncio.to_thread(
+                fallback_model.models.generate_content,
+                model=GEMINI_FLASH_MODEL_NAME,
+                contents=system_prompt,
+                config=GEMINI_STANDARD_CONFIG
+            )
             full_text_fallback = response_fallback.text
             recommended_tactic_fallback = parse_tactic_from_response(full_text_fallback)
             analysis_with_alert = f"{full_text_fallback}\n\n[RESEARCHER ALERT: This analysis was generated using the FALLBACK model due to a primary model error.]"
@@ -628,10 +649,12 @@ async def select_tactic_for_current_turn(
 
     for attempt in range(1, max_retries + 1):
         try:
+            # Use new Client API with minimal thinking config
             response = await asyncio.to_thread(
-                model.generate_content,
+                model.models.generate_content,
+                model=GEMINI_PRO_MODEL_NAME,
                 contents=system_prompt_for_tactic_selection,
-                safety_settings=safety_settings
+                config=GEMINI_THINKING_CONFIG
             )
             full_text = response.text.strip()
 
@@ -797,10 +820,12 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
     for attempt in range(1, max_retries + 1):
         try:
             # --- ATTEMPT: PRIMARY MODEL (NON-BLOCKING) ---
+            # Use new Client API with minimal thinking config
             response = await asyncio.to_thread(
-                GEMINI_PRO_MODEL.generate_content,
+                GEMINI_CLIENT.models.generate_content,
+                model=GEMINI_PRO_MODEL_NAME,
                 contents=system_prompt,
-                safety_settings=safety_settings
+                config=GEMINI_THINKING_CONFIG
             )
             # If successful, break out of retry loop
             break
@@ -882,10 +907,12 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
         for attempt_fallback in range(1, max_retries + 1):
             try:
                 # --- ATTEMPT: FALLBACK MODEL (NON-BLOCKING) ---
+                # Use standard config for Gemini 2.5 Flash (doesn't support thinking config)
                 response_fallback = await asyncio.to_thread(
-                    GEMINI_FLASH_MODEL.generate_content,
+                    GEMINI_CLIENT.models.generate_content,
+                    model=GEMINI_FLASH_MODEL_NAME,
                     contents=system_prompt,
-                    safety_settings=safety_settings
+                    config=GEMINI_STANDARD_CONFIG
                 )
                 # If successful, break out of retry loop
                 break
@@ -1021,7 +1048,10 @@ class NetworkDelayUpdateRequest(BaseModel):
 
 class RatingRequest(BaseModel):
     session_id: str
-    confidence: float
+    binary_choice: str  # 'human' or 'ai'
+    binary_choice_time_ms: Optional[float] = None  # Time taken to make binary choice
+    confidence: float  # 0-1 scale (normalized)
+    confidence_percent: Optional[int] = None  # 0-100 scale (original)
     decision_time_seconds: Optional[float] = None
     reading_time_seconds: Optional[float] = None
     active_decision_time_seconds: Optional[float] = None
@@ -1560,7 +1590,10 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
 
     session["intermediate_ddm_confidence_ratings"].append({
         "turn": session["turn_count"],
-        "confidence": data.confidence,
+        "binary_choice": data.binary_choice,  # 'human' or 'ai'
+        "binary_choice_time_ms": data.binary_choice_time_ms,  # Time to make binary choice
+        "confidence": data.confidence,  # 0-1 scale
+        "confidence_percent": data.confidence_percent,  # 0-100 scale
         "decision_time_seconds": actual_decision_time,
         "reading_time_seconds": data.reading_time_seconds,
         "active_decision_time_seconds": data.active_decision_time_seconds,
@@ -1598,19 +1631,13 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
     
     study_over = False
     if forced_completion:  # 7.5 minutes elapsed
-        # ENFORCE: Study can only end with exactly 0 or 1
-        if data.confidence != 0.0 and data.confidence != 1.0:
-            # Timer expired but invalid final choice - study CONTINUES
-            print(f"Session {session_id}: Timer expired but non-binary choice ({data.confidence}) submitted. Study continues.")
-            return {
-                "message": "Rating submitted.",
-                "study_over": False,  # Study keeps going
-                "ai_detected": None,
-                "session_data_summary": None
-            }
-        
-        # Valid 0 or 1 submitted - NOW the study can end
-        session["ai_detected_final"] = (data.confidence == 1.0)
+        # NEW: Study ends when time expires and participant submits their rating (binary choice + confidence)
+        # No longer require exactly 0 or 1 - the binary choice is the decision, confidence is always 0-100%
+
+        # Use binary choice to determine if AI was detected
+        session["ai_detected_final"] = (data.binary_choice == 'ai')
+        session["final_binary_choice"] = data.binary_choice
+        session["final_confidence_percent"] = data.confidence_percent
         session["final_decision_time_seconds_ddm"] = actual_decision_time
         
         # NEW: Final save with completion status
@@ -2208,7 +2235,13 @@ async def analyze_profile_for_initial_tactic_recommendation(primary_model, fallb
     for attempt in range(1, max_retries + 1):
         try:
             # --- ATTEMPT: PRIMARY MODEL (PRO) (NON-BLOCKING) ---
-            response = await asyncio.to_thread(primary_model.generate_content, contents=system_prompt)
+            # Use new Client API with minimal thinking config
+            response = await asyncio.to_thread(
+                primary_model.models.generate_content,
+                model=GEMINI_PRO_MODEL_NAME,
+                contents=system_prompt,
+                config=GEMINI_THINKING_CONFIG
+            )
             full_text = response.text
             recommended_tactic = parse_tactic_from_response(full_text)
             return {"full_analysis": full_text, "recommended_tactic_key": recommended_tactic}
@@ -2237,7 +2270,13 @@ async def analyze_profile_for_initial_tactic_recommendation(primary_model, fallb
     for attempt_fallback in range(1, max_retries + 1):
         try:
             # --- ATTEMPT: FALLBACK MODEL (FLASH) (NON-BLOCKING) ---
-            response_fallback = await asyncio.to_thread(fallback_model.generate_content, contents=system_prompt)
+            # Use standard config for Gemini 2.5 Flash (doesn't support thinking config)
+            response_fallback = await asyncio.to_thread(
+                fallback_model.models.generate_content,
+                model=GEMINI_FLASH_MODEL_NAME,
+                contents=system_prompt,
+                config=GEMINI_STANDARD_CONFIG
+            )
             full_text_fallback = response_fallback.text
             recommended_tactic_fallback = parse_tactic_from_response(full_text_fallback)
             analysis_with_alert = f"{full_text_fallback}\n\n[RESEARCHER ALERT: This analysis was generated using the FALLBACK model due to a primary model error.]"
@@ -2325,10 +2364,12 @@ async def select_tactic_for_current_turn(
 
     for attempt in range(1, max_retries + 1):
         try:
+            # Use new Client API with minimal thinking config
             response = await asyncio.to_thread(
-                model.generate_content,
+                model.models.generate_content,
+                model=GEMINI_PRO_MODEL_NAME,
                 contents=system_prompt_for_tactic_selection,
-                safety_settings=safety_settings
+                config=GEMINI_THINKING_CONFIG
             )
             full_text = response.text.strip()
 
@@ -2494,10 +2535,12 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
     for attempt in range(1, max_retries + 1):
         try:
             # --- ATTEMPT: PRIMARY MODEL (NON-BLOCKING) ---
+            # Use new Client API with minimal thinking config
             response = await asyncio.to_thread(
-                GEMINI_PRO_MODEL.generate_content,
+                GEMINI_CLIENT.models.generate_content,
+                model=GEMINI_PRO_MODEL_NAME,
                 contents=system_prompt,
-                safety_settings=safety_settings
+                config=GEMINI_THINKING_CONFIG
             )
             # If successful, break out of retry loop
             break
@@ -2579,10 +2622,12 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
         for attempt_fallback in range(1, max_retries + 1):
             try:
                 # --- ATTEMPT: FALLBACK MODEL (NON-BLOCKING) ---
+                # Use standard config for Gemini 2.5 Flash (doesn't support thinking config)
                 response_fallback = await asyncio.to_thread(
-                    GEMINI_FLASH_MODEL.generate_content,
+                    GEMINI_CLIENT.models.generate_content,
+                    model=GEMINI_FLASH_MODEL_NAME,
                     contents=system_prompt,
-                    safety_settings=safety_settings
+                    config=GEMINI_STANDARD_CONFIG
                 )
                 # If successful, break out of retry loop
                 break
@@ -2718,7 +2763,10 @@ class NetworkDelayUpdateRequest(BaseModel):
 
 class RatingRequest(BaseModel):
     session_id: str
-    confidence: float
+    binary_choice: str  # 'human' or 'ai'
+    binary_choice_time_ms: Optional[float] = None  # Time taken to make binary choice
+    confidence: float  # 0-1 scale (normalized)
+    confidence_percent: Optional[int] = None  # 0-100 scale (original)
     decision_time_seconds: Optional[float] = None
     reading_time_seconds: Optional[float] = None
     active_decision_time_seconds: Optional[float] = None
@@ -3257,7 +3305,10 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
 
     session["intermediate_ddm_confidence_ratings"].append({
         "turn": session["turn_count"],
-        "confidence": data.confidence,
+        "binary_choice": data.binary_choice,  # 'human' or 'ai'
+        "binary_choice_time_ms": data.binary_choice_time_ms,  # Time to make binary choice
+        "confidence": data.confidence,  # 0-1 scale
+        "confidence_percent": data.confidence_percent,  # 0-100 scale
         "decision_time_seconds": actual_decision_time,
         "reading_time_seconds": data.reading_time_seconds,
         "active_decision_time_seconds": data.active_decision_time_seconds,
@@ -3295,19 +3346,13 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
     
     study_over = False
     if forced_completion:  # 7.5 minutes elapsed
-        # ENFORCE: Study can only end with exactly 0 or 1
-        if data.confidence != 0.0 and data.confidence != 1.0:
-            # Timer expired but invalid final choice - study CONTINUES
-            print(f"Session {session_id}: Timer expired but non-binary choice ({data.confidence}) submitted. Study continues.")
-            return {
-                "message": "Rating submitted.",
-                "study_over": False,  # Study keeps going
-                "ai_detected": None,
-                "session_data_summary": None
-            }
-        
-        # Valid 0 or 1 submitted - NOW the study can end
-        session["ai_detected_final"] = (data.confidence == 1.0)
+        # NEW: Study ends when time expires and participant submits their rating (binary choice + confidence)
+        # No longer require exactly 0 or 1 - the binary choice is the decision, confidence is always 0-100%
+
+        # Use binary choice to determine if AI was detected
+        session["ai_detected_final"] = (data.binary_choice == 'ai')
+        session["final_binary_choice"] = data.binary_choice
+        session["final_confidence_percent"] = data.confidence_percent
         session["final_decision_time_seconds_ddm"] = actual_decision_time
         
         # NEW: Final save with completion status
