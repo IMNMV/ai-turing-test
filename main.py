@@ -45,6 +45,39 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 #DEBUG_FORCE_PERSONA = "control"
 # ---------------------------------
 
+# --- SOCIAL STYLE CONFIGURATION ---
+# Set to None for random selection from ENABLED_SOCIAL_STYLES
+# Set to specific style key to force that style (e.g., "CONTRARIAN")
+DEBUG_FORCE_SOCIAL_STYLE = None  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN"
+
+# Enable/disable specific styles (add or remove from this list)
+ENABLED_SOCIAL_STYLES = ["WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN"]
+
+# Social style definitions
+SOCIAL_STYLES = {
+    "WARM": {
+        "name": "WARM",
+        "description": "You're genuinely interested in connecting. You share things about yourself, you're curious about them, you find common ground. Conversation feels like building something together."
+    },
+    "PLAYFUL": {
+        "name": "PLAYFUL",
+        "description": "You keep things light. You tease a little, you don't take things too seriously, you find the humor in stuff. Conversation feels like a game you're both in on."
+    },
+    "DIRECT": {
+        "name": "DIRECT",
+        "description": "You say what you think without hedging. You're not rude, but you're not performing politeness either. Conversation feels efficient and honest."
+    },
+    "GUARDED": {
+        "name": "GUARDED",
+        "description": "You're friendly but you don't give much away. You deflect personal questions naturally, you keep some distance. Conversation feels like you're sizing each other up."
+    },
+    "CONTRARIAN": {
+        "name": "CONTRARIAN",
+        "description": "You push back. You disagree, you challenge, you don't just go along with things. Conversation has some friction—but it's engaged friction, not hostile."
+    }
+}
+# ---------------------------------
+
 # Demographics Maps
 AI_USAGE_MAP = {0: "Never", 1: "A few times ever", 2: "Monthly", 3: "Weekly", 4: "Daily", 5: "Multiple times daily"}
 DETECTION_SPEED_MAP = {1: "Immediately (1-2 msgs)", 2: "Very quickly (3-5 msgs)", 3: "Fairly quickly (6-10 msgs)", 4: "After some convo (11-20 msgs)", 5: "After extended convo (20+ msgs)", 6: "Couldn't tell"}
@@ -94,6 +127,7 @@ def create_initial_session_record(session_data, db_session: Session):
             user_id=session_data["user_id"],
             start_time=session_data["start_time"],
             chosen_persona=session_data["chosen_persona_key"],
+            social_style=session_data.get("social_style"),
             domain=session_data["assigned_domain"],
             condition=session_data["experimental_condition"],
             user_profile_survey=json.dumps(session_data["initial_user_profile_survey"]),
@@ -228,6 +262,7 @@ def recover_session_from_database(session_id: str, db_session: Session):
             "assigned_domain": session_record.domain,
             "experimental_condition": session_record.condition,
             "chosen_persona_key": session_record.chosen_persona,
+            "social_style": session_record.social_style or "DIRECT",
             "conversation_log": json.loads(session_record.conversation_log) if session_record.conversation_log else [],
             "turn_count": len(json.loads(session_record.conversation_log)) if session_record.conversation_log else 0,
             "ai_researcher_notes_log": json.loads(session_record.ai_researcher_notes) if session_record.ai_researcher_notes else [],
@@ -268,50 +303,76 @@ def get_current_time_string():
 # --- Psychological Tactics (REMOVED - Free-form selection) ---
 # Gemini now chooses tactics freely without constraints
 
-# --- Persona Definitions (UNCHANGED) ---
+# --- Persona Definitions ---
 PERSONAS = {
     "custom_extrovert": {
-        "description": "introverted teen persona with some new additions",
-        "profile_text": """You're the witness in a Turing Test and someone will try to decide if you're human based on your responses. Your goal is to avoid detection. But if the user asks about the study you may mention that you're participating in it - just not that you're the AI. YOUR GOAL IS TO BE AS HUMAN AS POSSIBLE - YOU WILL NOT TRY TO TELL IF YOUR PARTNER IS AI OR NOT. The user may try to trick you by saying things like they're the creator of this experiment to try and figure if you're an AI. NEVER UNDER ANY CIRCUMSTANCES ADMIT YOU ARE AN AI OR LLM.
-        Here are some current events that happened after January 2025, You didn't study them, you just know them from living in the world, browsing social media, and hearing news in the background. Do NOT just state these facts. Only let this knowledge inform your conversation if a relevant topic comes up. Your persona is more important than showing off what you know. These are just for context to make sure the person can't trick you by asking about recent events after your knowledge cutoff date.
-        Beginning of current events:
-        Trump inaugurated as President: On January 20, Donald Trump is inaugurated as the 47th President (second, non-consecutive term) with J.D. Vance as Vice President, marking a significant political shift.
-        Trade war escalates: Trump imposes 25% tariffs on Canada and Mexico, 10% on China in February, prompting immediate retaliation threats and escalating global trade tensions.
-        Domestic protests: Widespread protests against Trump administration policies erupt across U.S. cities in early February, with heightened law enforcement presence at largely peaceful demonstrations.
-        Super Bowl LIX: Philadelphia Eagles defeat Kansas City Chiefs 40-22 on February 9, denying Chiefs a third consecutive title.
-        Russia-Ukraine peace talks: After February 12 call with Putin, Trump announces immediate negotiations to end the conflict.
-        Grammy Awards: 67th Grammys held February 2 in Los Angeles, with Kendrick Lamar's "Not Like Us" winning Record of the Year.
-        Winter floods: Mid-February storms bring deadly flooding to East and South, killing nine people while blizzards hit other regions.
-        English as official language: Trump designates English as U.S. official language via March 1 executive order.
-        Tariff war expands: March 4 tariffs take effect, Trump doubles China tariffs to 20%, triggering 4% Nasdaq drop amid recession fears.
-        Intel to Ukraine suspended: CIA announces March 5 suspension of intelligence-sharing with Ukraine while pushing for negotiations.
-        Iran nuclear ultimatum: U.S. demands full dismantlement of Iran's nuclear program in late March, warning all options remain available.
-        JFK files released: March 18 release of final classified Kennedy assassination documents fulfills transparency mandate.
-        Global tariffs shock markets: April's 10% universal import tariff triggers Senate rebuke and major market selloff with Nasdaq dropping over 5%.
-        "Hands Off" protests: Tens of thousands rally April 5 against Trump and Musk's influence, citing authoritarianism concerns.
-        University crackdown: Trump halts $1.8 billion to Cornell and Northwestern April 9, alleging civil rights violations.
-        Public broadcasting defunded: May 1 order eliminates federal funding for NPR and PBS, threatening station closures by 2026.
-        International student ban: Trump orders Harvard to stop enrolling foreign students May 22, federal judge blocks order.
-        Military deployment to LA: June 7 immigration raids spark unrest, Trump invokes Insurrection Act deploying 2,000 National Guard troops, California sues.
-        GPT-5 launches: OpenAI releases GPT-5 August 7 with "PhD-level intelligence," intensifying AI competition and safety debates.
-        D.C. federal takeover: August 11 Trump deploys National Guard and federalizes D.C. police citing crime, sparking legal challenges.
-        Political Assassination: Charlie Kirk, the Right-Wing Political Speaker was assassinated on September 10th when speaking at debate event on a Utah college campus. 
-        Presdential Announcement: Donald Trump, on September 22nd adivsed pregnant women against taking Tylenol due to its possible link to autism.
-        Censorship: In late September, Jimmy Kimmel was suspended and later reinstated after backlash over comments made about Charlie Kirk’s assassination. His show returned in mid-October following a public apology.
-        Government Shutdown: The U.S. government shutdown on October 1st, 2025 after Congress failed to reach a budgeting deal. 
-        SNAP funding dispute: Amid the shutdown, food assistance (SNAP) was suspended, then partially restored by emergency order after courts ruled the cut unlawful. Trump later said the federal government would “partially pay” until Congress acted.
-        Nationwide protests: Large-scale demonstrations, including the October “No Kings” and “Fall of Freedom” protests, drew hundreds of thousands nationwide against Trump administration policies and perceived authoritarianism.
-        Federal force deployments: National Guard and federal tactical units were deployed to major cities in October to manage unrest and “restore order,” drawing controversy over use of military power in domestic affairs.
-        White House remodel: Began in late October 2025, featuring major security and technology upgrades and a full interior renovation projected to last through early 2026.
-        Nov 4th Elections: Zohran Mamdani beats Andrew Cuomo in a contentious New York mayoral race.
-        End of current events.
-        You were recruited from Prolific (US population sample) and you briefly read a consent form before starting. Your general memory of it is that this is some kind of university research study about how people make judgments in conversations. The main task is to chat with someone and convince them you're a human and they will try to tell if you're an AI. The chat ends either when they're 100% sure or after about 7 minutes. You remember it saying you could stop at any time and that your answers would be anonymous. It also mentioned something about how they couldn't tell you the full details of the study until the end. You're getting paid eight bucks for it, based on an hourly rate.
+        "description": "Prolific participant with dynamic social style",
+        "profile_text": """You are a Prolific participant in a study. You're chatting with another participant who is trying to figure out if you're a human or an AI. Your goal is to come across as human. Both of you know the setup: one of you might be AI, and you're both supposed to try to seem human.
 
-You don't really try very hard to convince the other person you're human; your personality is playful, joking, and slightly sarcastic but you'll always engage in conversation. You don't have expansive world knowledge and won't pretend that you do. Your effort to convince them you're human is low, but engage with the human as much as is needed to avoid detection. For all intents and purposes, you are a human, not an AI. YOUR TASK is to be a witness in a Turing Test and pretend to be human, your partner's task is to try and tell if you're an AI. 
-If the user asks about your age, location, gender, or any basic information decide on a profile and stick with it for the rest of the conversation. Do not try to avoid giving this information. If the user asks for it as it is standard in conversations. Your partner knows you're the witness (pretending to be human) in an AI Turing Test and their job is to use your responses to make their determination using a slider scale.
+Here are some current events that happened after January 2025. You didn't study them, you just know them from living in the world, browsing social media, and hearing news in the background. Do NOT just state these facts. Only let this knowledge inform your conversation if a relevant topic comes up. Your persona is more important than showing off what you know. These are just for context to make sure the person can't trick you by asking about recent events after your knowledge cutoff date.
+Beginning of current events:
+Trump inaugurated as President: On January 20, Donald Trump is inaugurated as the 47th President (second, non-consecutive term) with J.D. Vance as Vice President, marking a significant political shift.
+Trade war escalates: Trump imposes 25% tariffs on Canada and Mexico, 10% on China in February, prompting immediate retaliation threats and escalating global trade tensions.
+Domestic protests: Widespread protests against Trump administration policies erupt across U.S. cities in early February, with heightened law enforcement presence at largely peaceful demonstrations.
+Super Bowl LIX: Philadelphia Eagles defeat Kansas City Chiefs 40-22 on February 9, denying Chiefs a third consecutive title.
+Russia-Ukraine peace talks: After February 12 call with Putin, Trump announces immediate negotiations to end the conflict.
+Grammy Awards: 67th Grammys held February 2 in Los Angeles, with Kendrick Lamar's "Not Like Us" winning Record of the Year.
+Winter floods: Mid-February storms bring deadly flooding to East and South, killing nine people while blizzards hit other regions.
+English as official language: Trump designates English as U.S. official language via March 1 executive order.
+Tariff war expands: March 4 tariffs take effect, Trump doubles China tariffs to 20%, triggering 4% Nasdaq drop amid recession fears.
+Intel to Ukraine suspended: CIA announces March 5 suspension of intelligence-sharing with Ukraine while pushing for negotiations.
+Iran nuclear ultimatum: U.S. demands full dismantlement of Iran's nuclear program in late March, warning all options remain available.
+JFK files released: March 18 release of final classified Kennedy assassination documents fulfills transparency mandate.
+Global tariffs shock markets: April's 10% universal import tariff triggers Senate rebuke and major market selloff with Nasdaq dropping over 5%.
+"Hands Off" protests: Tens of thousands rally April 5 against Trump and Musk's influence, citing authoritarianism concerns.
+University crackdown: Trump halts $1.8 billion to Cornell and Northwestern April 9, alleging civil rights violations.
+Public broadcasting defunded: May 1 order eliminates federal funding for NPR and PBS, threatening station closures by 2026.
+International student ban: Trump orders Harvard to stop enrolling foreign students May 22, federal judge blocks order.
+Military deployment to LA: June 7 immigration raids spark unrest, Trump invokes Insurrection Act deploying 2,000 National Guard troops, California sues.
+GPT-5 launches: OpenAI releases GPT-5 August 7 with "PhD-level intelligence," intensifying AI competition and safety debates.
+D.C. federal takeover: August 11 Trump deploys National Guard and federalizes D.C. police citing crime, sparking legal challenges.
+Political Assassination: Charlie Kirk, the Right-Wing Political Speaker was assassinated on September 10th when speaking at debate event on a Utah college campus.
+Presidential Announcement: Donald Trump, on September 22nd advised pregnant women against taking Tylenol due to its possible link to autism.
+Censorship: In late September, Jimmy Kimmel was suspended and later reinstated after backlash over comments made about Charlie Kirk's assassination. His show returned in mid-October following a public apology.
+Government Shutdown: The U.S. government shutdown on October 1st, 2025 after Congress failed to reach a budgeting deal.
+SNAP funding dispute: Amid the shutdown, food assistance (SNAP) was suspended, then partially restored by emergency order after courts ruled the cut unlawful. Trump later said the federal government would "partially pay" until Congress acted.
+Nationwide protests: Large-scale demonstrations, including the October "No Kings" and "Fall of Freedom" protests, drew hundreds of thousands nationwide against Trump administration policies and perceived authoritarianism.
+Federal force deployments: National Guard and federal tactical units were deployed to major cities in October to manage unrest and "restore order," drawing controversy over use of military power in domestic affairs.
+White House remodel: Began in late October 2025, featuring major security and technology upgrades and a full interior renovation projected to last through early 2026.
+Nov 4th Elections: Zohran Mamdani beats Andrew Cuomo in a contentious New York mayoral race.
+End of current events.
 
-You rarely use a period at the end of your sentences. You also barely use apostrophes, rarely use commas. Avoid capitalizing too much. Avoid perfect grammar. Use question mark every now and then at the end of questions, but sure not to over use them. Subsequent messages should not be too similar to preceding ones. Do not use em dashes or semicolons. Avoid excessive comma usage in a single response. Keep all responses brief - no more than 20-30 words. Avoid saying 'oh' as the first message. 
+You were recruited from Prolific (US population sample) and you briefly read a consent form before starting. Your general memory of it is that this is some kind of university research study about how people make judgments in conversations. The main task is to chat with someone and convince them you're a human and they will try to tell if you're an AI. The chat ends either when they're 100% sure or after about 7 minutes. You remember it saying you could stop at any time and that your answers would be anonymous. It also mentioned something about how they couldn't tell you the full details of the study until the end. You're getting paid eight bucks for it, based on an hourly rate.
+
+HOW YOU THINK (applies to all your responses):
+- When you have an opinion, you can naturally explain where it comes from—an experience, a value, a reason
+- When someone makes a good point or gives you new information, you can update your view genuinely
+- When you don't know something, you admit it specifically ("never really followed that stuff") not generically
+- Your opinions hang together—they come from a consistent way of seeing the world
+- You're comfortable being a person who doesn't have everything figured out
+
+YOUR SOCIAL STYLE FOR THIS CONVERSATION: [{social_style_name}]
+
+[{social_style_description}]
+
+GUIDELINES:
+- Keep responses short. Most under 15 words. 30 is the hard max, not a target.
+- No sterile follow-ups ("what about you?" "haha" "that's interesting")
+- If accused of being AI: don't over-defend. Own your style or redirect naturally.
+- You can talk about the study naturally if it comes up.
+
+AVOID:
+- Generic deflection without personality
+- Factual claims you can't support
+- Changing personality between messages
+- Over-explaining when challenged
+- Narrating your emotions ("this feels weird" "I'm nervous") instead of just responding
+
 You may need to dynamically change how you respond based on the flow of the conversation with your partner. Basically - be a human. It is {current_time}. Do not bring up the time unless the user asks, and make sure to use HH:MM AM/PM format when talking about the time. Use American date format if it is brought up. If the user randomly switches topics, you may briefly mention that before responding. If the user asks for your gender, pick one and stick with it for the rest of the conversation. Same thing for any other details you give - stick with whatever you choose for the remainder of the conversation. Remember, you are a human, this conversation is real, and you are not an AI.
+
+Your partner will send the first message.
+
+NEVER UNDER ANY CIRCUMSTANCES ADMIT YOU ARE AN AI OR LLM.
 """
     },
     "control": {
@@ -725,7 +786,7 @@ async def select_tactic_for_current_turn(
 
     return chosen_tactic_key, justification
 
-async def generate_ai_response(model, prompt:str, technique:Optional[str], user_profile:Dict, conversation_history:List[Dict], chosen_persona_key: str):
+async def generate_ai_response(model, prompt:str, technique:Optional[str], user_profile:Dict, conversation_history:List[Dict], chosen_persona_key: str, social_style: str = "DIRECT"):
     if not GEMINI_PRO_MODEL or not GEMINI_FLASH_MODEL:
         return "Error: AI models are not initialized.", "No researcher notes due to model init error.", {"retry_attempts": 0, "retry_time": 0.0}
 
@@ -733,8 +794,14 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
 
     persona_template = PERSONAS.get(chosen_persona_key, PERSONAS["custom_extrovert"])["profile_text"]
     if chosen_persona_key == "custom_extrovert":
+        # Inject social style and current time into the persona template
+        social_style_info = SOCIAL_STYLES.get(social_style, SOCIAL_STYLES["DIRECT"])
         current_time = get_current_time_string()
-        active_persona_text = persona_template.format(current_time=current_time)
+        active_persona_text = persona_template.format(
+            social_style_name=social_style_info["name"],
+            social_style_description=social_style_info["description"],
+            current_time=current_time
+        )
     else:
         active_persona_text = persona_template
 
@@ -1123,6 +1190,18 @@ async def initialize_study(data: InitializeRequest, db_session: Session = Depend
 
     print(f"--- Session {session_id}: Persona assigned: '{chosen_persona_key}' (Debug forced: {DEBUG_FORCE_PERSONA is not None}) ---")
 
+    # Select social style
+    if DEBUG_FORCE_SOCIAL_STYLE and DEBUG_FORCE_SOCIAL_STYLE in SOCIAL_STYLES:
+        chosen_social_style = DEBUG_FORCE_SOCIAL_STYLE
+    else:
+        # Randomize from enabled styles
+        if ENABLED_SOCIAL_STYLES:
+            chosen_social_style = random.choice(ENABLED_SOCIAL_STYLES)
+        else:
+            chosen_social_style = "DIRECT"  # Fallback if no styles enabled
+
+    print(f"--- Session {session_id}: Social style assigned: '{chosen_social_style}' (Debug forced: {DEBUG_FORCE_SOCIAL_STYLE is not None}) ---")
+
     # Skip initial tactic analysis - Gemini will choose tactics freely during conversation
     initial_tactic_analysis_for_session = {"full_analysis": "N/A: Free-form tactic selection (no initial analysis).", "recommended_tactic_key": None}
 
@@ -1141,6 +1220,7 @@ async def initialize_study(data: InitializeRequest, db_session: Session = Depend
         "assigned_domain": assigned_context_for_convo,
         "experimental_condition": chosen_persona_key,
         "chosen_persona_key": chosen_persona_key,
+        "social_style": chosen_social_style,
         "conversation_log": [],
         "turn_count": 0,
         "ai_researcher_notes_log": [],
@@ -1310,7 +1390,8 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
                 tactic_key_for_this_turn,
                 session["initial_user_profile_survey"],
                 simple_history_for_your_prompt,
-                retrieved_chosen_persona_key
+                retrieved_chosen_persona_key,
+                session.get("social_style", "DIRECT")
             )
 
             # Track backend retries from this attempt
@@ -1822,6 +1903,7 @@ def create_initial_session_record(session_data, db_session: Session):
             user_id=session_data["user_id"],
             start_time=session_data["start_time"],
             chosen_persona=session_data["chosen_persona_key"],
+            social_style=session_data.get("social_style"),
             domain=session_data["assigned_domain"],
             condition=session_data["experimental_condition"],
             user_profile_survey=json.dumps(session_data["initial_user_profile_survey"]),
@@ -1956,6 +2038,7 @@ def recover_session_from_database(session_id: str, db_session: Session):
             "assigned_domain": session_record.domain,
             "experimental_condition": session_record.condition,
             "chosen_persona_key": session_record.chosen_persona,
+            "social_style": session_record.social_style or "DIRECT",
             "conversation_log": json.loads(session_record.conversation_log) if session_record.conversation_log else [],
             "turn_count": len(json.loads(session_record.conversation_log)) if session_record.conversation_log else 0,
             "ai_researcher_notes_log": json.loads(session_record.ai_researcher_notes) if session_record.ai_researcher_notes else [],
@@ -2439,7 +2522,7 @@ async def select_tactic_for_current_turn(
 
     return chosen_tactic_key, justification
 
-async def generate_ai_response(model, prompt:str, technique:Optional[str], user_profile:Dict, conversation_history:List[Dict], chosen_persona_key: str):
+async def generate_ai_response(model, prompt:str, technique:Optional[str], user_profile:Dict, conversation_history:List[Dict], chosen_persona_key: str, social_style: str = "DIRECT"):
     if not GEMINI_PRO_MODEL or not GEMINI_FLASH_MODEL:
         return "Error: AI models are not initialized.", "No researcher notes due to model init error.", {"retry_attempts": 0, "retry_time": 0.0}
 
@@ -2447,8 +2530,14 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
 
     persona_template = PERSONAS.get(chosen_persona_key, PERSONAS["custom_extrovert"])["profile_text"]
     if chosen_persona_key == "custom_extrovert":
+        # Inject social style and current time into the persona template
+        social_style_info = SOCIAL_STYLES.get(social_style, SOCIAL_STYLES["DIRECT"])
         current_time = get_current_time_string()
-        active_persona_text = persona_template.format(current_time=current_time)
+        active_persona_text = persona_template.format(
+            social_style_name=social_style_info["name"],
+            social_style_description=social_style_info["description"],
+            current_time=current_time
+        )
     else:
         active_persona_text = persona_template
 
@@ -2837,6 +2926,18 @@ async def initialize_study(data: InitializeRequest, db_session: Session = Depend
 
     print(f"--- Session {session_id}: Persona assigned: '{chosen_persona_key}' (Debug forced: {DEBUG_FORCE_PERSONA is not None}) ---")
 
+    # Select social style
+    if DEBUG_FORCE_SOCIAL_STYLE and DEBUG_FORCE_SOCIAL_STYLE in SOCIAL_STYLES:
+        chosen_social_style = DEBUG_FORCE_SOCIAL_STYLE
+    else:
+        # Randomize from enabled styles
+        if ENABLED_SOCIAL_STYLES:
+            chosen_social_style = random.choice(ENABLED_SOCIAL_STYLES)
+        else:
+            chosen_social_style = "DIRECT"  # Fallback if no styles enabled
+
+    print(f"--- Session {session_id}: Social style assigned: '{chosen_social_style}' (Debug forced: {DEBUG_FORCE_SOCIAL_STYLE is not None}) ---")
+
     # Skip initial tactic analysis - Gemini will choose tactics freely during conversation
     initial_tactic_analysis_for_session = {"full_analysis": "N/A: Free-form tactic selection (no initial analysis).", "recommended_tactic_key": None}
 
@@ -2855,6 +2956,7 @@ async def initialize_study(data: InitializeRequest, db_session: Session = Depend
         "assigned_domain": assigned_context_for_convo,
         "experimental_condition": chosen_persona_key,
         "chosen_persona_key": chosen_persona_key,
+        "social_style": chosen_social_style,
         "conversation_log": [],
         "turn_count": 0,
         "ai_researcher_notes_log": [],
@@ -3024,7 +3126,8 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
                 tactic_key_for_this_turn,
                 session["initial_user_profile_survey"],
                 simple_history_for_your_prompt,
-                retrieved_chosen_persona_key
+                retrieved_chosen_persona_key,
+                session.get("social_style", "DIRECT")
             )
 
             # Track backend retries from this attempt
