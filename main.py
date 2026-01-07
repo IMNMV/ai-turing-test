@@ -371,10 +371,11 @@ def initialize_gemini_models_and_module():
     primary_model_name = 'gemini-3-flash-preview'
     fallback_model_name = 'gemini-2.5-flash'
 
-    # Create config with MINIMAL thinking level for Gemini 3 Flash (using enum, not string!)
+    # Create config with LOW thinking level for Gemini 3 Flash (using string value)
+    # Note: Valid values are "low", "medium", "high" - "minimal" doesn't exist
     minimal_thinking_config = types.GenerateContentConfig(
         thinking_config=types.ThinkingConfig(
-            thinking_level=types.ThinkingLevel.MINIMAL  # Correct: enum value
+            thinking_level="low"  # Use string, not enum (enum doesn't exist in SDK)
         )
     )
 
@@ -389,7 +390,7 @@ try:
     GEMINI_MODEL = GEMINI_CLIENT
     GEMINI_PRO_MODEL = GEMINI_CLIENT  # Legacy compatibility
     GEMINI_FLASH_MODEL = GEMINI_CLIENT  # Legacy compatibility
-    print("Gemini 3 Flash (minimal thinking) and Gemini 2.5 Flash (fallback) initialized with new Client API using enum.")
+    print("Gemini 3 Flash (low thinking level) and Gemini 2.5 Flash (fallback) initialized with new Client API.")
 except Exception as e:
     print(f"FATAL: Could not initialize Gemini Models: {e}")
     GEMINI_CLIENT, GEMINI_PRO_MODEL_NAME, GEMINI_FLASH_MODEL_NAME, GEMINI_THINKING_CONFIG, GEMINI_STANDARD_CONFIG, GENAI_MODULE, GENAI_TYPES, GEMINI_MODEL, GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL = None, None, None, None, None, None, None, None, None, None
