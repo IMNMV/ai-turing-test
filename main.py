@@ -368,16 +368,17 @@ def initialize_gemini_models_and_module():
     client = genai.Client(api_key=API_KEY)
 
     # Model names
-    primary_model_name = 'models/gemini-3-flash-preview'
-    fallback_model_name = 'models/gemini-2.5-flash'
+    primary_model_name = 'gemini-3-flash-preview'
+    fallback_model_name = 'gemini-2.5-flash'
 
-    # Create config with minimal thinking level for Gemini 3 Flash
-    # Note: Circulation of thought signatures is required even with minimal level
+    # Create config with MINIMAL thinking level for Gemini 3 Flash (using enum, not string!)
     minimal_thinking_config = types.GenerateContentConfig(
-        thinking_config=types.ThinkingConfig(thinking_level="minimal")
+        thinking_config=types.ThinkingConfig(
+            thinking_level=types.ThinkingLevel.MINIMAL  # Correct: enum value
+        )
     )
 
-    # For fallback model (Gemini 2.5 Flash - doesn't support thinking config)
+    # For fallback model (Gemini 2.5 Flash - doesn't support thinking_level)
     standard_config = types.GenerateContentConfig()
 
     return client, primary_model_name, fallback_model_name, minimal_thinking_config, standard_config, genai, types
@@ -388,7 +389,7 @@ try:
     GEMINI_MODEL = GEMINI_CLIENT
     GEMINI_PRO_MODEL = GEMINI_CLIENT  # Legacy compatibility
     GEMINI_FLASH_MODEL = GEMINI_CLIENT  # Legacy compatibility
-    print("Gemini 3 Flash (minimal thinking) and Gemini 2.5 Flash (fallback) initialized with new Client API.")
+    print("Gemini 3 Flash (minimal thinking) and Gemini 2.5 Flash (fallback) initialized with new Client API using enum.")
 except Exception as e:
     print(f"FATAL: Could not initialize Gemini Models: {e}")
     GEMINI_CLIENT, GEMINI_PRO_MODEL_NAME, GEMINI_FLASH_MODEL_NAME, GEMINI_THINKING_CONFIG, GEMINI_STANDARD_CONFIG, GENAI_MODULE, GENAI_TYPES, GEMINI_MODEL, GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL = None, None, None, None, None, None, None, None, None, None
@@ -820,7 +821,6 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
     for attempt in range(1, max_retries + 1):
         try:
             # --- ATTEMPT: PRIMARY MODEL (NON-BLOCKING) ---
-            # Use new Client API with minimal thinking config
             response = await asyncio.to_thread(
                 GEMINI_CLIENT.models.generate_content,
                 model=GEMINI_PRO_MODEL_NAME,
@@ -907,7 +907,6 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
         for attempt_fallback in range(1, max_retries + 1):
             try:
                 # --- ATTEMPT: FALLBACK MODEL (NON-BLOCKING) ---
-                # Use standard config for Gemini 2.5 Flash (doesn't support thinking config)
                 response_fallback = await asyncio.to_thread(
                     GEMINI_CLIENT.models.generate_content,
                     model=GEMINI_FLASH_MODEL_NAME,
@@ -2535,7 +2534,6 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
     for attempt in range(1, max_retries + 1):
         try:
             # --- ATTEMPT: PRIMARY MODEL (NON-BLOCKING) ---
-            # Use new Client API with minimal thinking config
             response = await asyncio.to_thread(
                 GEMINI_CLIENT.models.generate_content,
                 model=GEMINI_PRO_MODEL_NAME,
@@ -2622,7 +2620,6 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
         for attempt_fallback in range(1, max_retries + 1):
             try:
                 # --- ATTEMPT: FALLBACK MODEL (NON-BLOCKING) ---
-                # Use standard config for Gemini 2.5 Flash (doesn't support thinking config)
                 response_fallback = await asyncio.to_thread(
                     GEMINI_CLIENT.models.generate_content,
                     model=GEMINI_FLASH_MODEL_NAME,
