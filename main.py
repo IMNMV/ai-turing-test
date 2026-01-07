@@ -102,8 +102,10 @@ app.add_middleware(
     allow_methods=["*"], # Allows all methods (GET, POST, etc.)
     allow_headers=["*"], # Allows all headers
 )
-#app.mount("/static", StaticFiles(directory="static"), name="static")
-#templates = Jinja2Templates(directory="templates")
+# Note: Frontend is hosted separately (GitHub Pages). If you need to
+# serve a local UI, mount static files and templates explicitly.
+# app.mount("/static", StaticFiles(directory="interaction-study-main-2/static"), name="static")
+# templates = Jinja2Templates(directory="interaction-study-main-2")
 
 # --- Database Imports ---
 from sqlalchemy.orm import Session
@@ -1158,7 +1160,17 @@ class FinalizeNoSessionRequest(BaseModel):
 # --- API Endpoints ---
 @app.get("/", response_class=HTMLResponse)
 async def get_home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    # Avoid dependency on Jinja templates since the frontend is served separately.
+    # Provide a simple status page for health checks and developer convenience.
+    return HTMLResponse(
+        content=(
+            "<html><head><title>AI Turing Test API</title></head>"
+            "<body><h2>Backend is running.</h2>"
+            "<p>This service exposes JSON endpoints for the study frontend.</p>"
+            "</body></html>"
+        ),
+        status_code=200,
+    )
 
 @app.post("/initialize_study")
 async def initialize_study(data: InitializeRequest, db_session: Session = Depends(get_db)):
