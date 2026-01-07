@@ -72,4 +72,10 @@ class StudySession(Base):
     has_excessive_delays = Column(Boolean, default=False)  # Flag if session had network delays >40s
 
 
-Base.metadata.create_all(bind=engine)
+# Create tables - wrapped in try/except to prevent import failures
+try:
+    Base.metadata.create_all(bind=engine)
+    print("Database tables created/verified successfully")
+except Exception as e:
+    print(f"WARNING: Could not create database tables during import: {e}")
+    print("Tables will be created on first database access")
