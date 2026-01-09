@@ -71,6 +71,15 @@ class StudySession(Base):
     final_confidence_percent = Column(Integer, nullable=True)  # 0-100 confidence in final choice
     has_excessive_delays = Column(Boolean, default=False)  # Flag if session had network delays >40s
 
+    # NEW: Human witness mode - Role and matching fields
+    role = Column(String, nullable=True)  # "interrogator" or "witness"
+    matched_session_id = Column(String, nullable=True, index=True)  # Partner's session_id
+    match_status = Column(String, default="unmatched", index=True)  # "unmatched", "waiting", "matched", "partner_dropped", "completed"
+    waiting_room_entered_at = Column(DateTime, nullable=True, index=True)  # When entered waiting room (for FIFO)
+    matched_at = Column(DateTime, nullable=True)  # When successfully matched with partner
+    first_message_sender = Column(String, nullable=True)  # "interrogator" or "witness" (randomly assigned)
+    witness_instructions_version = Column(String, nullable=True)  # Track which instructions shown to witness
+
 
 # Create tables - wrapped in try/except to prevent import failures
 try:
