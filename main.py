@@ -1317,7 +1317,7 @@ def run_periodic_cleanup():
     while True:
         time_module.sleep(300)  # 5 minutes
         try:
-            db_session = SessionLocal()
+            db_session = db.SessionLocal()
             cleanup_orphaned_sessions(db_session)
             db_session.close()
         except Exception as e:
