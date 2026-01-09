@@ -1550,9 +1550,9 @@ async def enter_waiting_room(request: Request, db_session: Session = Depends(get
 
     # Check study mode
     if STUDY_MODE == "AI_WITNESS":
-        # AI witness mode - skip waiting room, proceed directly
+        # AI witness mode - show waiting room for consistency, but use simulated matching
         session['role'] = 'interrogator'
-        session['match_status'] = 'matched'
+        session['match_status'] = 'waiting'  # Will simulate match on frontend
         session['matched_session_id'] = None  # No human partner
         session['first_message_sender'] = 'interrogator'  # User always sends first in AI mode
 
@@ -1562,15 +1562,15 @@ async def enter_waiting_room(request: Request, db_session: Session = Depends(get
         ).first()
         if session_record:
             session_record.role = 'interrogator'
-            session_record.match_status = 'matched'
+            session_record.match_status = 'waiting'  # Will be updated when chat starts
             db_session.commit()
 
-        print(f"Session {session_id[:8]}... proceeding with AI witness (no waiting room)")
+        print(f"Session {session_id[:8]}... will show waiting room (AI mode - simulated match)")
 
         return JSONResponse(content={
             "ai_partner": True,
             "role": "interrogator",
-            "match_status": "matched"
+            "match_status": "waiting"  # Frontend will simulate finding match
         })
 
     # HUMAN_WITNESS mode - assign role and enter waiting room
@@ -2109,7 +2109,7 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
 @app.post("/log_conversation_start")
 async def log_conversation_start(data: ConversationStartRequest, db_session: Session = Depends(get_db)):
     session_id = data.session_id
-    
+
     # Try to recover session from database if not in memory
     if session_id not in sessions:
         recovered_session = recover_session_from_database(session_id, db_session)
@@ -2118,10 +2118,24 @@ async def log_conversation_start(data: ConversationStartRequest, db_session: Ses
             flag_session_as_recovered(session_id, db_session)
         else:
             raise HTTPException(status_code=404, detail="Session not found")
-    
+
     session = sessions[session_id]
     session["conversation_start_time"] = time.time()
-    
+
+    # Update match status to "matched" when conversation starts (for AI mode simulated match)
+    if session.get('match_status') == 'waiting':
+        session['match_status'] = 'matched'
+        session['matched_at'] = datetime.utcnow()
+
+        # Update database
+        session_record = db_session.query(db.StudySession).filter(
+            db.StudySession.id == session_id
+        ).first()
+        if session_record:
+            session_record.match_status = 'matched'
+            session_record.matched_at = datetime.utcnow()
+            db_session.commit()
+
     print(f"Conversation start logged for session {session_id}")
     return {"message": "Conversation start time logged"}
 
