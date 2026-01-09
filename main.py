@@ -11,6 +11,7 @@ import random
 import html
 import re
 import asyncio
+import threading
 from datetime import datetime
 
 from fastapi import FastAPI, Request, Depends, HTTPException
@@ -44,6 +45,11 @@ RESPONSE_DELAY_THINKING_SCALE = 0.4  # Gamma distribution scale parameter (theta
 #DEBUG_FORCE_PERSONA = None # For randomization
 DEBUG_FORCE_PERSONA = "custom_extrovert"
 #DEBUG_FORCE_PERSONA = "control"
+# ---------------------------------
+
+# --- STUDY MODE CONFIGURATION ---
+# Toggle between AI witness and human witness conditions
+STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # ---------------------------------
 
 # --- SOCIAL STYLE CONFIGURATION ---
@@ -1157,6 +1163,211 @@ class FinalizeNoSessionRequest(BaseModel):
     reason: Optional[str] = None
 # --- End Pydantic Models ---
 
+# --- Human Witness Mode Helper Functions ---
+
+# CRITICAL: Lock to prevent race conditions during matching
+# When multiple users enter waiting room simultaneously, only one can match at a time
+matching_lock = threading.Lock()
+
+def assign_role_balanced(db_session: Session) -> str:
+    """
+    Assign role to balance 50/50 interrogator/witness split.
+    Returns "interrogator" or "witness"
+    """
+    # Count current waiting participants by role
+    waiting_interrogators = db_session.query(db.StudySession).filter(
+        db.StudySession.match_status == "waiting",
+        db.StudySession.role == "interrogator"
+    ).count()
+
+    waiting_witnesses = db_session.query(db.StudySession).filter(
+        db.StudySession.match_status == "waiting",
+        db.StudySession.role == "witness"
+    ).count()
+
+    # Assign role to balance the queue
+    if waiting_interrogators > waiting_witnesses:
+        return "witness"
+    elif waiting_witnesses > waiting_interrogators:
+        return "interrogator"
+    else:
+        # Equal numbers (or both zero) - randomly assign
+        return random.choice(["interrogator", "witness"])
+
+def attempt_match(db_session: Session) -> Optional[Dict[str, str]]:
+    """
+    Try to match oldest waiting interrogator with oldest waiting witness.
+    Returns match info dict if successful, None if no match possible.
+
+    THREAD-SAFE: Uses matching_lock to prevent race conditions when multiple
+    users enter waiting room simultaneously.
+    """
+    # CRITICAL: Acquire lock to prevent race conditions
+    # Only one matching operation can happen at a time
+    with matching_lock:
+        # Query oldest waiting interrogator (FIFO - first in, first matched)
+        interrogator = db_session.query(db.StudySession).filter(
+            db.StudySession.role == "interrogator",
+            db.StudySession.match_status == "waiting"
+        ).order_by(db.StudySession.waiting_room_entered_at.asc()).first()
+
+        # Query oldest waiting witness
+        witness = db_session.query(db.StudySession).filter(
+            db.StudySession.role == "witness",
+            db.StudySession.match_status == "waiting"
+        ).order_by(db.StudySession.waiting_room_entered_at.asc()).first()
+
+        if not interrogator or not witness:
+            return None  # No match possible yet
+
+        # Randomly assign who sends first message
+        first_sender = random.choice(['interrogator', 'witness'])
+
+        # Create the match
+        interrogator.matched_session_id = witness.id
+        interrogator.match_status = "matched"
+        interrogator.first_message_sender = first_sender
+        interrogator.matched_at = datetime.utcnow()
+
+        witness.matched_session_id = interrogator.id
+        witness.match_status = "matched"
+        witness.first_message_sender = first_sender
+        witness.matched_at = datetime.utcnow()
+
+        # Update in-memory sessions if they exist
+        if interrogator.id in sessions:
+            sessions[interrogator.id]['matched_session_id'] = witness.id
+            sessions[interrogator.id]['match_status'] = "matched"
+            sessions[interrogator.id]['first_message_sender'] = first_sender
+
+        if witness.id in sessions:
+            sessions[witness.id]['matched_session_id'] = interrogator.id
+            sessions[witness.id]['match_status'] = "matched"
+            sessions[witness.id]['first_message_sender'] = first_sender
+
+        db_session.commit()
+
+        print(f"Match created: Interrogator {interrogator.id[:8]}... <-> Witness {witness.id[:8]}... (first sender: {first_sender})")
+
+        return {
+            'interrogator_sid': interrogator.id,
+            'witness_sid': witness.id,
+            'first_sender': first_sender
+        }
+
+def cleanup_orphaned_sessions(db_session: Session):
+    """
+    Background cleanup job to detect and mark orphaned/stale sessions.
+    Called periodically to prevent users from waiting forever.
+
+    Handles:
+    1. Matched sessions where neither partner sent messages (one probably dropped)
+    2. Waiting sessions stuck for too long (likely from server restart)
+    """
+    from datetime import timedelta
+
+    try:
+        # 1. Clean up matched sessions with no activity (orphaned at start)
+        # If matched >3 minutes ago but no messages sent, assume one partner dropped
+        stale_matches = db_session.query(db.StudySession).filter(
+            db.StudySession.match_status == "matched",
+            db.StudySession.matched_at < datetime.utcnow() - timedelta(minutes=3)
+        ).all()
+
+        for session in stale_matches:
+            # Check if any messages were sent
+            conv_log = json.loads(session.conversation_log) if session.conversation_log else []
+            if len(conv_log) == 0:
+                # No messages sent - mark as orphaned
+                session.match_status = "orphaned"
+
+                # Notify partner if they exist
+                if session.matched_session_id:
+                    partner = db_session.query(db.StudySession).filter(
+                        db.StudySession.id == session.matched_session_id
+                    ).first()
+                    if partner and partner.match_status == "matched":
+                        partner.match_status = "partner_dropped"
+
+                print(f"Orphaned session cleaned up: {session.id[:8]}... (matched but no messages)")
+
+        # 2. Clean up waiting sessions stuck for too long (>10 minutes)
+        # These are likely from server restarts or matching failures
+        stale_waiting = db_session.query(db.StudySession).filter(
+            db.StudySession.match_status == "waiting",
+            db.StudySession.waiting_room_entered_at < datetime.utcnow() - timedelta(minutes=10)
+        ).all()
+
+        for session in stale_waiting:
+            session.match_status = "timed_out"
+            print(f"Stale waiting session cleaned up: {session.id[:8]}... (waiting >10 min)")
+
+        db_session.commit()
+
+    except Exception as e:
+        print(f"Error in cleanup_orphaned_sessions: {str(e)}")
+        db_session.rollback()
+
+# Schedule cleanup job to run every 5 minutes
+import threading
+import time as time_module
+
+def run_periodic_cleanup():
+    """Background thread that runs cleanup every 5 minutes"""
+    while True:
+        time_module.sleep(300)  # 5 minutes
+        try:
+            db_session = SessionLocal()
+            cleanup_orphaned_sessions(db_session)
+            db_session.close()
+        except Exception as e:
+            print(f"Periodic cleanup error: {str(e)}")
+
+# Start cleanup thread when server starts
+cleanup_thread = threading.Thread(target=run_periodic_cleanup, daemon=True)
+cleanup_thread.start()
+print("🔧 Background cleanup thread started (runs every 5 minutes)")
+
+# --- API Endpoints ---
+
+@app.get("/health")
+async def health_check(db_session: Session = Depends(get_db)):
+    """
+    Health check endpoint with detailed system status.
+    Use this to monitor if the server is healthy.
+    """
+    try:
+        # Check database connection
+        db_session.execute("SELECT 1")
+
+        # Count active sessions
+        active_count = len([s for s in sessions.values() if s.get('session_status') == 'active'])
+
+        # Count waiting/matched
+        waiting_count = db_session.query(db.StudySession).filter(
+            db.StudySession.match_status == "waiting"
+        ).count()
+
+        matched_count = db_session.query(db.StudySession).filter(
+            db.StudySession.match_status == "matched"
+        ).count()
+
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "study_mode": STUDY_MODE,
+            "active_sessions": active_count,
+            "waiting_for_match": waiting_count,
+            "currently_matched": matched_count,
+            "cleanup_thread": "running" if cleanup_thread.is_alive() else "dead"
+        }
+    except Exception as e:
+        print(f"❌ HEALTH CHECK FAILED: {str(e)}")
+        return {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+
 # --- API Endpoints ---
 @app.get("/", response_class=HTMLResponse)
 async def get_home(request: Request):
@@ -1276,7 +1487,7 @@ async def debug_log(request: Request):
     """Internal debug logging endpoint - logs frontend debug info to Railway only"""
     try:
         data = await request.json()
-        
+
         # Extract debug info
         log_type = data.get("error_type", "Unknown")
         log_message = data.get("error_message", "No message")
@@ -1285,16 +1496,16 @@ async def debug_log(request: Request):
         timestamp = data.get("timestamp", "Unknown")
         stack_trace = data.get("stack_trace", "No stack trace")
         additional_context = data.get("additional_context", {})
-        
+
         # Determine if this is an actual error or just debug info
         is_error = log_type.endswith('_ERROR') or 'ERROR' in log_type or 'FRONTEND_ERROR' in log_type
-        
+
         # Log to Railway (server logs only)
         print("=" * 60)
         if is_error:
-            print("FRONTEND ERROR CAPTURED")
+            print("🔴 FRONTEND ERROR CAPTURED")
         else:
-            print("FRONTEND DEBUG INFO")
+            print("🔵 FRONTEND DEBUG INFO")
         print("=" * 60)
         print(f"Timestamp: {timestamp}")
         print(f"Session ID: {session_id}")
@@ -1306,7 +1517,7 @@ async def debug_log(request: Request):
         if additional_context:
             print(f"Additional Context: {json.dumps(additional_context, indent=2)}")
         print("=" * 60)
-        
+
         return {"status": "logged"}
         
     except Exception as e:
@@ -1317,6 +1528,290 @@ async def debug_log(request: Request):
         print(f"Failed to parse debug log request: {str(e)}")
         print("=" * 60)
         return {"status": "error", "message": str(e)}
+
+
+@app.post("/enter_waiting_room")
+async def enter_waiting_room(request: Request, db_session: Session = Depends(get_db)):
+    """
+    Endpoint called after demographics submission.
+    Assigns role and enters waiting room for HUMAN_WITNESS mode.
+    For AI_WITNESS mode, returns immediately to proceed to chat.
+    """
+    data = await request.json()
+    session_id = data.get('session_id')
+
+    print(f"⏳ ENTER_WAITING_ROOM: Session {session_id[:8]}... Mode: {STUDY_MODE}")
+
+    if session_id not in sessions:
+        print(f"❌ ERROR: Session {session_id[:8]}... not found in memory")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = sessions[session_id]
+
+    # Check study mode
+    if STUDY_MODE == "AI_WITNESS":
+        # AI witness mode - skip waiting room, proceed directly
+        session['role'] = 'interrogator'
+        session['match_status'] = 'matched'
+        session['matched_session_id'] = None  # No human partner
+        session['first_message_sender'] = 'interrogator'  # User always sends first in AI mode
+
+        # Update database
+        session_record = db_session.query(db.StudySession).filter(
+            db.StudySession.id == session_id
+        ).first()
+        if session_record:
+            session_record.role = 'interrogator'
+            session_record.match_status = 'matched'
+            db_session.commit()
+
+        print(f"Session {session_id[:8]}... proceeding with AI witness (no waiting room)")
+
+        return JSONResponse(content={
+            "ai_partner": True,
+            "role": "interrogator",
+            "match_status": "matched"
+        })
+
+    # HUMAN_WITNESS mode - assign role and enter waiting room
+    assigned_role = assign_role_balanced(db_session)
+
+    session['role'] = assigned_role
+    session['match_status'] = 'waiting'
+    session['waiting_room_entered_at'] = datetime.utcnow()
+
+    # Update database
+    try:
+        session_record = db_session.query(db.StudySession).filter(
+            db.StudySession.id == session_id
+        ).first()
+        if session_record:
+            session_record.role = assigned_role
+            session_record.match_status = 'waiting'
+            session_record.waiting_room_entered_at = datetime.utcnow()
+            db_session.commit()
+            print(f"✅ Session {session_id[:8]}... assigned role: {assigned_role}, DB updated")
+        else:
+            print(f"⚠️ WARNING: Session {session_id[:8]}... not found in database during waiting room entry")
+    except Exception as e:
+        print(f"❌ DATABASE ERROR: Failed to update session {session_id[:8]}... in waiting room: {str(e)}")
+        db_session.rollback()
+
+    # Try to match immediately
+    match_result = attempt_match(db_session)
+    if match_result:
+        print(f"⚡ IMMEDIATE MATCH: {session_id[:8]}... matched instantly!")
+    else:
+        print(f"⏳ NO MATCH YET: {session_id[:8]}... waiting for partner...")
+
+    return JSONResponse(content={
+        "ai_partner": False,
+        "role": assigned_role,
+        "match_status": session.get('match_status', 'waiting')
+    })
+
+
+@app.get("/check_match_status")
+async def check_match_status(session_id: str, db_session: Session = Depends(get_db)):
+    """
+    Poll endpoint to check if participant has been matched with a partner.
+    Called every 3 seconds from frontend while in waiting room.
+    """
+    # Try in-memory first
+    if session_id in sessions:
+        session = sessions[session_id]
+    else:
+        # Check database
+        session_record = db_session.query(db.StudySession).filter(
+            db.StudySession.id == session_id
+        ).first()
+        if not session_record:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Recover from database
+        recovered = recover_session_from_database(session_id, db_session)
+        if recovered:
+            sessions[session_id] = recovered
+            session = recovered
+        else:
+            raise HTTPException(status_code=404, detail="Session could not be recovered")
+
+    match_status = session.get('match_status', 'unmatched')
+
+    # Calculate time waiting
+    time_waiting_seconds = 0
+    if session.get('waiting_room_entered_at'):
+        entered_at = session['waiting_room_entered_at']
+        if isinstance(entered_at, datetime):
+            time_waiting_seconds = (datetime.utcnow() - entered_at).total_seconds()
+
+    if match_status == 'matched':
+        return JSONResponse(content={
+            "matched": True,
+            "partner_session_id": session.get('matched_session_id'),
+            "first_message_sender": session.get('first_message_sender'),
+            "time_waiting_seconds": time_waiting_seconds
+        })
+    else:
+        return JSONResponse(content={
+            "matched": False,
+            "time_waiting_seconds": time_waiting_seconds
+        })
+
+
+@app.get("/check_partner_message")
+async def check_partner_message(session_id: str, db_session: Session = Depends(get_db)):
+    """
+    Poll endpoint for human-human conversations.
+    Checks if partner has sent a new message.
+    """
+    if session_id not in sessions:
+        print(f"⚠️ CHECK_PARTNER_MESSAGE: Session {session_id[:8]}... not in memory, attempting recovery")
+        # Try recovery
+        recovered_session = recover_session_from_database(session_id, db_session)
+        if recovered_session:
+            sessions[session_id] = recovered_session
+            print(f"✅ Session {session_id[:8]}... recovered successfully")
+        else:
+            print(f"❌ Session {session_id[:8]}... recovery failed - not found in database")
+            raise HTTPException(status_code=404, detail="Session not found")
+
+    session = sessions[session_id]
+    partner_id = session.get('matched_session_id')
+
+    if not partner_id:
+        raise HTTPException(status_code=400, detail="No partner matched")
+
+    # Check if partner session exists
+    partner = sessions.get(partner_id)
+    if not partner:
+        # Partner might have dropped - check database
+        partner_record = db_session.query(db.StudySession).filter(
+            db.StudySession.id == partner_id
+        ).first()
+
+        if not partner_record or partner_record.match_status == "partner_dropped":
+            return JSONResponse(content={
+                "new_message": False,
+                "partner_dropped": True
+            })
+
+        # Try to recover partner session
+        partner = recover_session_from_database(partner_id, db_session)
+        if partner:
+            sessions[partner_id] = partner
+        else:
+            return JSONResponse(content={
+                "new_message": False,
+                "partner_dropped": True
+            })
+
+    # Check if partner has sent a new message
+    # SAFETY: Only return messages that are actually newer (prevents duplicates)
+    partner_turn = partner.get('turn_count', 0)
+    my_turn = session.get('turn_count', 0)
+
+    if partner_turn > my_turn:
+        # Partner has sent a new message
+        latest_message = partner['conversation_log'][-1] if partner['conversation_log'] else None
+
+        if latest_message:
+            # SAFETY: Verify turn numbers match (detect gaps)
+            if partner_turn - my_turn > 1:
+                print(f"⚠️ MESSAGE GAP: Session {session_id[:8]}... - Partner turn {partner_turn}, my turn {my_turn}")
+                # Still continue - frontend will handle it
+
+            # Add partner's message to my conversation log
+            session['conversation_log'].append(latest_message)
+            session['turn_count'] = partner_turn
+
+            print(f"✉️ MESSAGE DELIVERED: {partner_id[:8]}... -> {session_id[:8]}... (Turn {partner_turn})")
+
+            return JSONResponse(content={
+                "new_message": True,
+                "message_text": latest_message.get('user', latest_message.get('assistant', '')),
+                "turn": partner_turn,
+                "timestamp": time.time(),
+                "partner_dropped": False
+            })
+
+    return JSONResponse(content={
+        "new_message": False,
+        "partner_dropped": False
+    })
+
+
+@app.get("/check_session_status")
+async def check_session_status(session_id: str, db_session: Session = Depends(get_db)):
+    """
+    Check session status for refresh recovery.
+    Returns current state of session for frontend to restore.
+    """
+    session_record = db_session.query(db.StudySession).filter(
+        db.StudySession.id == session_id
+    ).first()
+
+    if not session_record:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get turn count from conversation log
+    turn_count = 0
+    if session_record.conversation_log:
+        try:
+            conv_log = json.loads(session_record.conversation_log)
+            turn_count = len(conv_log)
+        except:
+            turn_count = 0
+
+    return JSONResponse(content={
+        "session_id": session_id,
+        "role": session_record.role,
+        "match_status": session_record.match_status,
+        "matched_session_id": session_record.matched_session_id,
+        "first_message_sender": session_record.first_message_sender,
+        "turn_count": turn_count
+    })
+
+
+@app.post("/report_partner_dropped")
+async def report_partner_dropped(request: Request, db_session: Session = Depends(get_db)):
+    """
+    Report that partner has disconnected.
+    Marks both sessions as partner_dropped.
+    """
+    data = await request.json()
+    session_id = data.get('session_id')
+
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = sessions[session_id]
+    partner_id = session.get('matched_session_id')
+
+    # Mark this session as partner_dropped
+    session['match_status'] = 'partner_dropped'
+    session_record = db_session.query(db.StudySession).filter(
+        db.StudySession.id == session_id
+    ).first()
+    if session_record:
+        session_record.match_status = 'partner_dropped'
+
+    # Mark partner's session as partner_dropped
+    if partner_id:
+        if partner_id in sessions:
+            sessions[partner_id]['match_status'] = 'partner_dropped'
+
+        partner_record = db_session.query(db.StudySession).filter(
+            db.StudySession.id == partner_id
+        ).first()
+        if partner_record:
+            partner_record.match_status = 'partner_dropped'
+
+    db_session.commit()
+
+    print(f"Partner dropout logged: {session_id[:8]}... <-> {partner_id[:8] if partner_id else 'None'}...")
+
+    return JSONResponse(content={"message": "Partner dropout logged"})
 
 
 @app.post("/send_message")
@@ -1336,10 +1831,47 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         else:
             raise HTTPException(status_code=404, detail="Session not found")
     
+    session = sessions[session_id]
+
+    # NEW: Check if this is human-human conversation (HUMAN_WITNESS mode)
+    partner_session_id = session.get('matched_session_id')
+    is_human_partner = (STUDY_MODE == "HUMAN_WITNESS" and
+                        partner_session_id and
+                        partner_session_id in sessions)
+
+    if is_human_partner:
+        # Human witness conversation - route message to partner (no AI generation)
+        partner = sessions[partner_session_id]
+        current_turn = session["turn_count"] + 1
+
+        # Add message to both conversation logs
+        turn_data = {
+            "turn": current_turn,
+            "user": user_message,
+            "assistant": "",  # No AI response
+            "sender_role": session.get('role', 'unknown'),
+            "timestamp": datetime.utcnow().timestamp()
+        }
+
+        session["conversation_log"].append(turn_data)
+        session["turn_count"] = current_turn
+
+        # Save to database
+        update_session_after_message(session, db_session)
+
+        print(f"Human-human message routed: {session.get('role')} ({session_id[:8]}...) -> {partner.get('role')} ({partner_session_id[:8]}...)")
+
+        return {
+            "human_partner": True,
+            "message_routed": True,
+            "turn": current_turn,
+            "timestamp": datetime.utcnow().timestamp()
+        }
+
+    # AI_WITNESS mode or no human partner - proceed with AI generation
     if not GEMINI_MODEL:
         raise HTTPException(status_code=500, detail="AI Model not initialized.")
 
-    session = sessions[session_id]
     # Turn count will be incremented after successful AI response generation
     current_ai_response_turn = session["turn_count"] + 1
 
@@ -1672,7 +2204,7 @@ async def update_network_delay(data: NetworkDelayUpdateRequest, db_session: Sess
 @app.post("/submit_rating")
 async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_db)):
     session_id = data.session_id
-    
+
     # NEW: Try to recover session from database if not in memory
     if session_id not in sessions:
         recovered_session = recover_session_from_database(session_id, db_session)
@@ -1683,8 +2215,15 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
             print(f"Session {session_id} recovered from database for rating and flagged")
         else:
             raise HTTPException(status_code=404, detail="Session not found")
-    
+
     session = sessions[session_id]
+
+    # NEW: Block witnesses from submitting ratings (only interrogators can rate)
+    if session.get('role') == 'witness':
+        raise HTTPException(
+            status_code=403,
+            detail="Witnesses cannot submit ratings. Only interrogators can rate."
+        )
 
     actual_decision_time = data.decision_time_seconds
     if actual_decision_time is None:
