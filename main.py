@@ -1220,8 +1220,8 @@ def attempt_match(db_session: Session) -> Optional[Dict[str, str]]:
         if not interrogator or not witness:
             return None  # No match possible yet
 
-        # Randomly assign who sends first message
-        first_sender = random.choice(['interrogator', 'witness'])
+        # Interrogator always sends first message
+        first_sender = 'interrogator'
 
         # Create the match
         interrogator.matched_session_id = witness.id
