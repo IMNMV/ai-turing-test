@@ -1291,16 +1291,16 @@ def cleanup_orphaned_sessions(db_session: Session):
 
                 print(f"Orphaned session cleaned up: {session.id[:8]}... (matched but no messages)")
 
-        # 2. Clean up waiting sessions stuck for too long (>10 minutes)
-        # These are likely from server restarts or matching failures
+        # 2. Clean up waiting sessions stuck for too long (>2 minutes)
+        # These are likely from abandoned browsers or people who closed the tab
         stale_waiting = db_session.query(db.StudySession).filter(
             db.StudySession.match_status == "waiting",
-            db.StudySession.waiting_room_entered_at < datetime.utcnow() - timedelta(minutes=10)
+            db.StudySession.waiting_room_entered_at < datetime.utcnow() - timedelta(minutes=2)
         ).all()
 
         for session in stale_waiting:
             session.match_status = "timed_out"
-            print(f"Stale waiting session cleaned up: {session.id[:8]}... (waiting >10 min)")
+            print(f"🧹 Stale waiting session cleaned up: {session.id[:8]}... (waiting >2 min)")
 
         db_session.commit()
 
