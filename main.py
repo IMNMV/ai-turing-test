@@ -1573,10 +1573,52 @@ async def enter_waiting_room(request: Request, db_session: Session = Depends(get
             "match_status": "waiting"  # Frontend will simulate finding match
         })
 
-    # HUMAN_WITNESS mode - assign role and enter waiting room
+    # HUMAN_WITNESS mode - assign role only (don't mark as waiting yet)
     assigned_role = assign_role_balanced(db_session)
 
     session['role'] = assigned_role
+    session['match_status'] = 'assigned'  # Not "waiting" yet
+
+    # Update database
+    try:
+        session_record = db_session.query(db.StudySession).filter(
+            db.StudySession.id == session_id
+        ).first()
+        if session_record:
+            session_record.role = assigned_role
+            db_session.commit()
+            print(f"✅ Session {session_id[:8]}... assigned role: {assigned_role}, DB updated")
+        else:
+            print(f"⚠️ WARNING: Session {session_id[:8]}... not found in database during role assignment")
+    except Exception as e:
+        print(f"❌ DATABASE ERROR: Failed to update session {session_id[:8]}... during role assignment: {str(e)}")
+        db_session.rollback()
+
+    return JSONResponse(content={
+        "ai_partner": False,
+        "role": assigned_role,
+        "match_status": "assigned"  # Not waiting yet
+    })
+
+
+@app.post("/join_waiting_room")
+async def join_waiting_room(request: Request, db_session: Session = Depends(get_db)):
+    """
+    Called when user clicks "Enter Waiting Room" button.
+    Marks session as waiting and attempts to match.
+    """
+    data = await request.json()
+    session_id = data.get('session_id')
+
+    print(f"🚪 JOIN_WAITING_ROOM: Session {session_id[:8]}... clicking button to enter")
+
+    if session_id not in sessions:
+        print(f"❌ ERROR: Session {session_id[:8]}... not found in memory")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = sessions[session_id]
+
+    # Mark as waiting now
     session['match_status'] = 'waiting'
     session['waiting_room_entered_at'] = datetime.utcnow()
 
@@ -1586,18 +1628,17 @@ async def enter_waiting_room(request: Request, db_session: Session = Depends(get
             db.StudySession.id == session_id
         ).first()
         if session_record:
-            session_record.role = assigned_role
             session_record.match_status = 'waiting'
             session_record.waiting_room_entered_at = datetime.utcnow()
             db_session.commit()
-            print(f"✅ Session {session_id[:8]}... assigned role: {assigned_role}, DB updated")
+            print(f"✅ Session {session_id[:8]}... marked as waiting, DB updated")
         else:
-            print(f"⚠️ WARNING: Session {session_id[:8]}... not found in database during waiting room entry")
+            print(f"⚠️ WARNING: Session {session_id[:8]}... not found in database")
     except Exception as e:
-        print(f"❌ DATABASE ERROR: Failed to update session {session_id[:8]}... in waiting room: {str(e)}")
+        print(f"❌ DATABASE ERROR: Failed to mark session {session_id[:8]}... as waiting: {str(e)}")
         db_session.rollback()
 
-    # Try to match immediately
+    # Try to match
     match_result = attempt_match(db_session)
     if match_result:
         print(f"⚡ IMMEDIATE MATCH: {session_id[:8]}... matched instantly!")
@@ -1605,8 +1646,7 @@ async def enter_waiting_room(request: Request, db_session: Session = Depends(get
         print(f"⏳ NO MATCH YET: {session_id[:8]}... waiting for partner...")
 
     return JSONResponse(content={
-        "ai_partner": False,
-        "role": assigned_role,
+        "success": True,
         "match_status": session.get('match_status', 'waiting')
     })
 
