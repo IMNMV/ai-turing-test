@@ -78,6 +78,7 @@ class StudySession(Base):
     waiting_room_entered_at = Column(DateTime, nullable=True, index=True)  # When entered waiting room (for FIFO)
     matched_at = Column(DateTime, nullable=True)  # When successfully matched with partner
     first_message_sender = Column(String, nullable=True)  # "interrogator" or "witness" (randomly assigned)
+    proceed_to_chat_at = Column(DateTime, nullable=True)  # When both can proceed (10s after later entry)
     witness_instructions_version = Column(String, nullable=True)  # Track which instructions shown to witness
 
 
