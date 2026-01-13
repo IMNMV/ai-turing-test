@@ -1771,10 +1771,20 @@ async def check_partner_message(session_id: str, db_session: Session = Depends(g
             db.StudySession.id == partner_id
         ).first()
 
+        # Check if partner completed the study normally (interrogator finished)
+        if partner_record and partner_record.session_status == "completed":
+            print(f"✅ PARTNER COMPLETED: {partner_id[:8]}... completed study normally")
+            return JSONResponse(content={
+                "new_message": False,
+                "partner_dropped": False,
+                "study_completed": True  # Partner finished the study
+            })
+
         if not partner_record or partner_record.match_status == "partner_dropped":
             return JSONResponse(content={
                 "new_message": False,
-                "partner_dropped": True
+                "partner_dropped": True,
+                "study_completed": False
             })
 
         # Try to recover partner session
@@ -1784,7 +1794,8 @@ async def check_partner_message(session_id: str, db_session: Session = Depends(g
         else:
             return JSONResponse(content={
                 "new_message": False,
-                "partner_dropped": True
+                "partner_dropped": True,
+                "study_completed": False
             })
 
     # Check if partner has sent a new message
@@ -1813,12 +1824,14 @@ async def check_partner_message(session_id: str, db_session: Session = Depends(g
                 "message_text": latest_message.get('user', latest_message.get('assistant', '')),
                 "turn": partner_turn,
                 "timestamp": time.time(),
-                "partner_dropped": False
+                "partner_dropped": False,
+                "study_completed": False
             })
 
     return JSONResponse(content={
         "new_message": False,
-        "partner_dropped": False
+        "partner_dropped": False,
+        "study_completed": False
     })
 
 
