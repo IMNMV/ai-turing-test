@@ -294,8 +294,24 @@ def recover_session_from_database(session_id: str, db_session: Session):
             recovered_session["pure_ddm_timestamp"] = session_record.pure_ddm_timestamp
             recovered_session["pure_ddm_turn_number"] = session_record.pure_ddm_turn_number
             recovered_session["pure_ddm_decision_time_seconds"] = session_record.pure_ddm_decision_time_seconds
-            
-        print(f"Successfully recovered session {session_id} from database")
+
+        # Add human witness mode fields
+        if session_record.role:
+            recovered_session["role"] = session_record.role
+        if session_record.match_status:
+            recovered_session["match_status"] = session_record.match_status
+        if session_record.matched_session_id:
+            recovered_session["matched_session_id"] = session_record.matched_session_id
+        if session_record.first_message_sender:
+            recovered_session["first_message_sender"] = session_record.first_message_sender
+        if session_record.waiting_room_entered_at:
+            recovered_session["waiting_room_entered_at"] = session_record.waiting_room_entered_at
+        if session_record.matched_at:
+            recovered_session["matched_at"] = session_record.matched_at
+        if session_record.proceed_to_chat_at:
+            recovered_session["proceed_to_chat_at"] = session_record.proceed_to_chat_at
+
+        print(f"✅ Session {session_id[:8]}... recovered successfully")
         return recovered_session
         
     except Exception as e:
@@ -1223,27 +1239,43 @@ def attempt_match(db_session: Session) -> Optional[Dict[str, str]]:
         # Interrogator always sends first message
         first_sender = 'interrogator'
 
+        # DESIGN FIX: Calculate when both can proceed to chat
+        # Both must wait until BOTH have had >= 10 seconds to read instructions
+        # Use the later entry time + 10 seconds
+        interrogator_entered = interrogator.waiting_room_entered_at or datetime.utcnow()
+        witness_entered = witness.waiting_room_entered_at or datetime.utcnow()
+        later_entry_time = max(interrogator_entered, witness_entered)
+        proceed_to_chat_at = later_entry_time + timedelta(seconds=10)
+
+        print(f"🕐 PROCEED TIME CALCULATED: Interrogator entered {interrogator_entered.strftime('%H:%M:%S')}, "
+              f"Witness entered {witness_entered.strftime('%H:%M:%S')}, "
+              f"Both can proceed at {proceed_to_chat_at.strftime('%H:%M:%S')}")
+
         # Create the match
         interrogator.matched_session_id = witness.id
         interrogator.match_status = "matched"
         interrogator.first_message_sender = first_sender
         interrogator.matched_at = datetime.utcnow()
+        interrogator.proceed_to_chat_at = proceed_to_chat_at
 
         witness.matched_session_id = interrogator.id
         witness.match_status = "matched"
         witness.first_message_sender = first_sender
         witness.matched_at = datetime.utcnow()
+        witness.proceed_to_chat_at = proceed_to_chat_at
 
         # Update in-memory sessions if they exist
         if interrogator.id in sessions:
             sessions[interrogator.id]['matched_session_id'] = witness.id
             sessions[interrogator.id]['match_status'] = "matched"
             sessions[interrogator.id]['first_message_sender'] = first_sender
+            sessions[interrogator.id]['proceed_to_chat_at'] = proceed_to_chat_at
 
         if witness.id in sessions:
             sessions[witness.id]['matched_session_id'] = interrogator.id
             sessions[witness.id]['match_status'] = "matched"
             sessions[witness.id]['first_message_sender'] = first_sender
+            sessions[witness.id]['proceed_to_chat_at'] = proceed_to_chat_at
 
         db_session.commit()
 
@@ -1610,11 +1642,9 @@ async def join_waiting_room(request: Request, db_session: Session = Depends(get_
 
     # ATOMIC: Assign role + mark as waiting in one operation
     assigned_role = assign_role_balanced(db_session)
-    session['role'] = assigned_role
-    session['match_status'] = 'waiting'
-    session['waiting_room_entered_at'] = datetime.utcnow()
+    waiting_timestamp = datetime.utcnow()
 
-    # Update database
+    # FIXED BUG #2: Update database FIRST before memory (true atomicity)
     try:
         session_record = db_session.query(db.StudySession).filter(
             db.StudySession.id == session_id
@@ -1622,14 +1652,23 @@ async def join_waiting_room(request: Request, db_session: Session = Depends(get_
         if session_record:
             session_record.role = assigned_role
             session_record.match_status = 'waiting'
-            session_record.waiting_room_entered_at = datetime.utcnow()
+            session_record.waiting_room_entered_at = waiting_timestamp
             db_session.commit()
             print(f"✅ Session {session_id[:8]}... assigned role: {assigned_role}, marked as waiting, DB updated")
         else:
             print(f"⚠️ WARNING: Session {session_id[:8]}... not found in database")
+            raise HTTPException(status_code=404, detail="Session not found in database")
+    except HTTPException:
+        raise  # Re-raise HTTPException as-is
     except Exception as e:
         print(f"❌ DATABASE ERROR: Failed to update session {session_id[:8]}... during join: {str(e)}")
         db_session.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+    # Only update memory if database write succeeded
+    session['role'] = assigned_role
+    session['match_status'] = 'waiting'
+    session['waiting_room_entered_at'] = waiting_timestamp
 
     # Try to match
     match_result = attempt_match(db_session)
@@ -1680,11 +1719,19 @@ async def check_match_status(session_id: str, db_session: Session = Depends(get_
             time_waiting_seconds = (datetime.utcnow() - entered_at).total_seconds()
 
     if match_status == 'matched':
+        # Get proceed_to_chat_at timestamp for frontend synchronization
+        proceed_at = session.get('proceed_to_chat_at')
+        proceed_at_timestamp = proceed_at.timestamp() if isinstance(proceed_at, datetime) else None
+
+        print(f"🔍 MATCH STATUS CHECK: Session {session_id[:8]}... matched, proceed_at={proceed_at}, "
+              f"timestamp={proceed_at_timestamp}, type={type(proceed_at).__name__}")
+
         return JSONResponse(content={
             "matched": True,
             "partner_session_id": session.get('matched_session_id'),
             "first_message_sender": session.get('first_message_sender'),
-            "time_waiting_seconds": time_waiting_seconds
+            "time_waiting_seconds": time_waiting_seconds,
+            "proceed_to_chat_at": proceed_at_timestamp  # Unix timestamp for frontend
         })
     else:
         return JSONResponse(content={
@@ -1773,6 +1820,54 @@ async def check_partner_message(session_id: str, db_session: Session = Depends(g
         "new_message": False,
         "partner_dropped": False
     })
+
+
+@app.post("/signal_typing")
+async def signal_typing(request: Request):
+    """
+    Signal that user is currently typing.
+    Sets a timestamp - partner can check if recent (within last 3 seconds = still typing).
+    """
+    data = await request.json()
+    session_id = data.get('session_id')
+
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = sessions[session_id]
+
+    # Store typing timestamp
+    session['typing_at'] = datetime.utcnow()
+
+    return JSONResponse(content={"success": True})
+
+
+@app.get("/check_partner_typing")
+async def check_partner_typing(session_id: str):
+    """
+    Check if partner is currently typing.
+    Returns true if partner's typing timestamp is within last 3 seconds.
+    """
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = sessions[session_id]
+    partner_id = session.get('matched_session_id')
+
+    if not partner_id or partner_id not in sessions:
+        return JSONResponse(content={"is_typing": False})
+
+    partner = sessions[partner_id]
+    typing_at = partner.get('typing_at')
+
+    if typing_at and isinstance(typing_at, datetime):
+        # Check if typing signal is recent (within last 3 seconds)
+        seconds_since_typing = (datetime.utcnow() - typing_at).total_seconds()
+        is_typing = seconds_since_typing < 3.0
+
+        return JSONResponse(content={"is_typing": is_typing})
+
+    return JSONResponse(content={"is_typing": False})
 
 
 @app.get("/check_session_status")
