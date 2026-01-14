@@ -1644,6 +1644,16 @@ async def join_waiting_room(request: Request, db_session: Session = Depends(get_
     assigned_role = assign_role_balanced(db_session)
     waiting_timestamp = datetime.utcnow()
 
+    # NEW: Assign social style to witnesses (same as AI gets)
+    assigned_social_style = None
+    if assigned_role == "witness":
+        # Randomly select social style from enabled styles
+        if DEBUG_FORCE_SOCIAL_STYLE and DEBUG_FORCE_SOCIAL_STYLE in ENABLED_SOCIAL_STYLES:
+            assigned_social_style = DEBUG_FORCE_SOCIAL_STYLE
+        else:
+            assigned_social_style = random.choice(ENABLED_SOCIAL_STYLES)
+        print(f"🎭 WITNESS SOCIAL STYLE: Session {session_id[:8]}... assigned style: {assigned_social_style}")
+
     # FIXED BUG #2: Update database FIRST before memory (true atomicity)
     try:
         session_record = db_session.query(db.StudySession).filter(
@@ -1653,6 +1663,9 @@ async def join_waiting_room(request: Request, db_session: Session = Depends(get_
             session_record.role = assigned_role
             session_record.match_status = 'waiting'
             session_record.waiting_room_entered_at = waiting_timestamp
+            # NEW: Store social style for witnesses
+            if assigned_social_style:
+                session_record.social_style = assigned_social_style
             db_session.commit()
             print(f"✅ Session {session_id[:8]}... assigned role: {assigned_role}, marked as waiting, DB updated")
         else:
@@ -1669,6 +1682,9 @@ async def join_waiting_room(request: Request, db_session: Session = Depends(get_
     session['role'] = assigned_role
     session['match_status'] = 'waiting'
     session['waiting_room_entered_at'] = waiting_timestamp
+    # NEW: Store social style in memory for witnesses
+    if assigned_social_style:
+        session['social_style'] = assigned_social_style
 
     # Try to match
     match_result = attempt_match(db_session)
@@ -1677,11 +1693,20 @@ async def join_waiting_room(request: Request, db_session: Session = Depends(get_
     else:
         print(f"⏳ NO MATCH YET: {session_id[:8]}... waiting for partner...")
 
-    return JSONResponse(content={
+    # Build response with social style info for witnesses
+    response_data = {
         "success": True,
         "role": assigned_role,
         "match_status": session.get('match_status', 'waiting')
-    })
+    }
+
+    # NEW: Include social style instructions for witnesses
+    if assigned_social_style:
+        style_info = SOCIAL_STYLES.get(assigned_social_style, {})
+        response_data["social_style"] = assigned_social_style
+        response_data["social_style_description"] = style_info.get("description", "")
+
+    return JSONResponse(content=response_data)
 
 
 @app.get("/check_match_status")
@@ -2531,7 +2556,7 @@ async def submit_final_comment(data: FinalCommentRequest, db_session: Session = 
     return {"message": "Final comment received. Thank you."}
 
 @app.post("/finalize_no_session")
-async def finalize_no_session(data: FinalizeNoSessionRequest):
+async def finalize_no_session(data: FinalizeNoSessionRequest, db_session: Session = Depends(get_db)):
     # Build a minimal session-like structure to persist
     participant_id_val = data.participant_id
     prolific_pid_val = data.prolific_pid or None
@@ -2546,7 +2571,22 @@ async def finalize_no_session(data: FinalizeNoSessionRequest):
             "prolific_pid": prolific_pid_val,
             "session_id": None
         })
-    # For production, you might want to store incomplete sessions in database too
+
+    # NEW: Save dropout to database for tracking
+    try:
+        dropped_participant = db.DroppedParticipant(
+            participant_id=participant_id_val,
+            prolific_pid=prolific_pid_val,
+            reason=data.reason or "unknown"
+        )
+        db_session.add(dropped_participant)
+        db_session.commit()
+        print(f"✅ DROPOUT SAVED: Participant {participant_id_val[:8]}... declined/dropped with reason: {data.reason}")
+    except Exception as e:
+        print(f"❌ ERROR saving dropout to database: {e}")
+        db_session.rollback()
+        # Don't raise error - still return success to frontend
+
     print(f"Finalized incomplete session for participant {participant_id_val} with reason: {data.reason}")
     return {"message": "Finalized without session and logged."}
 
