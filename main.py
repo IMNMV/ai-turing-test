@@ -137,6 +137,7 @@ def create_initial_session_record(session_data, db_session: Session):
             user_id=session_data["user_id"],
             start_time=session_data["start_time"],
             chosen_persona=session_data["chosen_persona_key"],
+            role=session_data.get("role"),  # NEW: Pre-assigned role
             social_style=session_data.get("social_style"),
             domain=session_data["assigned_domain"],
             condition=session_data["experimental_condition"],
@@ -1126,6 +1127,9 @@ class InitializeRequest(BaseModel):
     # Identifiers
     participant_id: Optional[str] = None
     prolific_pid: Optional[str] = None
+    # NEW: Pre-assigned role (from /get_or_assign_role)
+    role: str  # "interrogator" or "witness"
+    social_style: Optional[str] = None  # Social style if witness (e.g., "WARM", "PLAYFUL")
 
 class ChatRequest(BaseModel):
     session_id: str
@@ -1177,6 +1181,11 @@ class FinalizeNoSessionRequest(BaseModel):
     participant_id: str
     prolific_pid: Optional[str] = None
     reason: Optional[str] = None
+
+class GetOrAssignRoleRequest(BaseModel):
+    participant_id: str
+    prolific_pid: Optional[str] = None
+
 # --- End Pydantic Models ---
 
 # --- Human Witness Mode Helper Functions ---
@@ -1426,12 +1435,182 @@ async def get_home(request: Request):
         status_code=200,
     )
 
+@app.post("/get_or_assign_role")
+async def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session = Depends(get_db)):
+    """
+    Assign role (interrogator or witness) to participant on page load.
+
+    CRITICAL: Role assignment is PERMANENT for a participant_id (IRB compliance).
+    If participant refreshes page, they MUST get the same role they were originally assigned.
+
+    Uses atomic counter to maintain 50/50 balance between interrogator and witness roles.
+
+    AI_WITNESS MODE: Everyone is assigned interrogator (no counter needed).
+    """
+    participant_id = data.participant_id
+    prolific_pid = data.prolific_pid
+
+    print(f"🎭 Role assignment request for participant_id={participant_id}, prolific_pid={prolific_pid}, mode={STUDY_MODE}")
+
+    # AI_WITNESS MODE: Everyone is interrogator (talking to AI)
+    if STUDY_MODE == "AI_WITNESS":
+        print(f"✅ AI_WITNESS mode: Assigning interrogator role (no counter)")
+        return {
+            "role": "interrogator",
+            "is_existing": False
+        }
+
+    # STEP 1: Check if participant already has a role assigned (for refresh scenarios)
+    # Search by participant_id (which is the session_id in the StudySession table)
+    existing_session = db_session.query(db.StudySession).filter(
+        db.StudySession.id == participant_id
+    ).first()
+
+    if existing_session and existing_session.role:
+        # Participant already has a role - return it (IRB COMPLIANCE: never reassign!)
+        print(f"✅ Found existing role for participant: {existing_session.role}")
+
+        response_data = {
+            "role": existing_session.role,
+            "is_existing": True
+        }
+
+        # Include social style info if witness
+        if existing_session.role == "witness" and existing_session.social_style:
+            style_info = SOCIAL_STYLES.get(existing_session.social_style, {})
+            response_data["social_style"] = existing_session.social_style
+            response_data["social_style_description"] = style_info.get("description", "")
+
+        return response_data
+
+    # STEP 2: New participant - assign role using atomic counter
+    try:
+        # Get or create the counter row (single row table with id=1)
+        counter = db_session.query(db.RoleAssignmentCounter).filter(
+            db.RoleAssignmentCounter.id == 1
+        ).with_for_update().first()
+
+        if not counter:
+            # First time - initialize counter
+            counter = db.RoleAssignmentCounter(
+                id=1,
+                interrogator_count=0,
+                witness_count=0
+            )
+            db_session.add(counter)
+            db_session.flush()  # Get the counter row created
+            print("📊 Initialized RoleAssignmentCounter")
+
+        # Decide which role to assign based on current counts
+        if counter.interrogator_count < counter.witness_count:
+            assigned_role = "interrogator"
+            counter.interrogator_count += 1
+        elif counter.witness_count < counter.interrogator_count:
+            assigned_role = "witness"
+            counter.witness_count += 1
+        else:
+            # Equal counts - randomly assign
+            assigned_role = random.choice(["interrogator", "witness"])
+            if assigned_role == "interrogator":
+                counter.interrogator_count += 1
+            else:
+                counter.witness_count += 1
+
+        # Assign social style if witness
+        assigned_social_style = None
+        social_style_description = None
+
+        if assigned_role == "witness":
+            # Respect DEBUG_FORCE_SOCIAL_STYLE if set
+            if DEBUG_FORCE_SOCIAL_STYLE and DEBUG_FORCE_SOCIAL_STYLE in ENABLED_SOCIAL_STYLES:
+                assigned_social_style = DEBUG_FORCE_SOCIAL_STYLE
+            else:
+                assigned_social_style = random.choice(ENABLED_SOCIAL_STYLES)
+
+            style_info = SOCIAL_STYLES.get(assigned_social_style, {})
+            social_style_description = style_info.get("description", "")
+
+        # Commit the counter update
+        db_session.commit()
+
+        print(f"🎭 ROLE ASSIGNED: {assigned_role} "
+              f"(Counter now: interrogator={counter.interrogator_count}, witness={counter.witness_count})"
+              f"{f', social_style={assigned_social_style}' if assigned_social_style else ''}")
+
+        # CRITICAL: Create minimal DB record immediately so /finalize_no_session can find it
+        # This is needed for counter decrement if participant drops out before /initialize_study
+        try:
+            minimal_session = db.StudySession(
+                id=participant_id,  # Use participant_id as session_id
+                user_id=prolific_pid or participant_id,
+                start_time=datetime.utcnow(),
+                role=assigned_role,
+                social_style=assigned_social_style,
+                chosen_persona="pending",  # Will be set by /initialize_study
+                domain="pending",
+                condition="pending",
+                user_profile_survey=json.dumps({}),  # Empty for now
+                initial_tactic_analysis="pending",
+                session_status="pre_consent",  # Mark as not yet consented
+                last_updated=datetime.utcnow()
+            )
+            db_session.add(minimal_session)
+            db_session.commit()
+            print(f"✅ Created minimal DB record for {participant_id[:8]}... (pre-consent)")
+        except Exception as e:
+            # If record already exists (e.g., from refresh), that's OK
+            print(f"⚠️ Could not create minimal record (may already exist): {e}")
+            db_session.rollback()
+
+        # Return role assignment
+        response_data = {
+            "role": assigned_role,
+            "is_existing": False
+        }
+
+        if assigned_role == "witness":
+            response_data["social_style"] = assigned_social_style
+            response_data["social_style_description"] = social_style_description
+
+        return response_data
+
+    except Exception as e:
+        db_session.rollback()
+        print(f"❌ Error in role assignment: {e}")
+        raise HTTPException(status_code=500, detail=f"Role assignment failed: {str(e)}")
+
 @app.post("/initialize_study")
 async def initialize_study(data: InitializeRequest, db_session: Session = Depends(get_db)):
     if not GEMINI_MODEL:
         raise HTTPException(status_code=500, detail="AI Model not initialized.")
 
-    session_id = str(uuid.uuid4())
+    # CRITICAL: Use participant_id as session_id for role lookup to work
+    # participant_id is persistent across refreshes (stored in localStorage)
+    # This allows /get_or_assign_role to find existing sessions on refresh
+    participant_id_val = data.participant_id or None
+    if not participant_id_val:
+        raise HTTPException(status_code=400, detail="participant_id is required")
+
+    session_id = participant_id_val  # Use participant_id as the session identifier
+
+    # Check if session already exists
+    # Could be: (1) minimal record from /get_or_assign_role, or (2) full record from previous /initialize_study
+    existing_session = db_session.query(db.StudySession).filter(
+        db.StudySession.id == session_id
+    ).first()
+
+    # Check if this is a full record (has demographics) or just minimal (pre-consent)
+    if existing_session:
+        if existing_session.session_status == "pre_consent":
+            # Minimal record exists - we need to UPDATE it with full demographics
+            print(f"🔄 Updating minimal record {session_id[:8]}... with full demographics")
+            # Will continue to update the record below
+        else:
+            # Full record already exists - this is a refresh after demographics submitted
+            print(f"⚠️ Session {session_id[:8]}... fully initialized, returning existing")
+            # Note: In-memory session recovery happens in other endpoints if needed
+            # All data is safely stored in database
+            return {"session_id": session_id, "message": "Study already initialized."}
     
     # Create the full user profile from all the new fields
     # Sanitize text inputs
@@ -1466,23 +1645,19 @@ async def initialize_study(data: InitializeRequest, db_session: Session = Depend
 
     print(f"--- Session {session_id}: Persona assigned: '{chosen_persona_key}' (Debug forced: {DEBUG_FORCE_PERSONA is not None}) ---")
 
-    # Select social style
-    if DEBUG_FORCE_SOCIAL_STYLE and DEBUG_FORCE_SOCIAL_STYLE in SOCIAL_STYLES:
-        chosen_social_style = DEBUG_FORCE_SOCIAL_STYLE
-    else:
-        # Randomize from enabled styles
-        if ENABLED_SOCIAL_STYLES:
-            chosen_social_style = random.choice(ENABLED_SOCIAL_STYLES)
-        else:
-            chosen_social_style = "DIRECT"  # Fallback if no styles enabled
+    # NEW: Use pre-assigned role and social style from /get_or_assign_role
+    # Role was already assigned on page load for proper consent form display (IRB compliance)
+    assigned_role = data.role
+    assigned_social_style = data.social_style
 
-    print(f"--- Session {session_id}: Social style assigned: '{chosen_social_style}' (Debug forced: {DEBUG_FORCE_SOCIAL_STYLE is not None}) ---")
+    print(f"--- Session {session_id}: Role PRE-ASSIGNED: '{assigned_role}' ---")
+    if assigned_social_style:
+        print(f"--- Session {session_id}: Social style PRE-ASSIGNED: '{assigned_social_style}' ---")
 
     # Skip initial tactic analysis - Gemini will choose tactics freely during conversation
     initial_tactic_analysis_for_session = {"full_analysis": "N/A: Free-form tactic selection (no initial analysis).", "recommended_tactic_key": None}
 
-    # NEW: identifiers and ui event log
-    participant_id_val = data.participant_id or None
+    # NEW: identifiers and ui event log (participant_id_val already set above)
     prolific_pid_val = data.prolific_pid or None
 
     sessions[session_id] = {
@@ -1496,7 +1671,8 @@ async def initialize_study(data: InitializeRequest, db_session: Session = Depend
         "assigned_domain": assigned_context_for_convo,
         "experimental_condition": chosen_persona_key,
         "chosen_persona_key": chosen_persona_key,
-        "social_style": chosen_social_style,
+        "role": assigned_role,  # NEW: Pre-assigned role (interrogator or witness)
+        "social_style": assigned_social_style,  # NEW: Pre-assigned social style (for witnesses)
         "conversation_log": [],
         "turn_count": 0,
         "ai_researcher_notes_log": [],
@@ -1516,11 +1692,38 @@ async def initialize_study(data: InitializeRequest, db_session: Session = Depend
     # Merge any pre-session UI events
     if participant_id_val and participant_id_val in pre_session_events:
         sessions[session_id]["ui_event_log"].extend(pre_session_events.pop(participant_id_val))
-    
+
     sessions[session_id]["experimental_condition"] = chosen_persona_key
 
-    # NEW: Create initial database record immediately
-    create_initial_session_record(sessions[session_id], db_session)
+    # NEW: Update existing minimal record OR create new record
+    if existing_session and existing_session.session_status == "pre_consent":
+        # UPDATE existing minimal record with full data
+        try:
+            ui_events = sessions[session_id].get("ui_event_log", [])
+            consent_accepted = any(event.get("event") == "consent_agree_clicked" for event in ui_events)
+
+            existing_session.user_id = sessions[session_id]["user_id"]
+            existing_session.start_time = sessions[session_id]["start_time"]
+            existing_session.chosen_persona = sessions[session_id]["chosen_persona_key"]
+            existing_session.domain = sessions[session_id]["assigned_domain"]
+            existing_session.condition = sessions[session_id]["experimental_condition"]
+            existing_session.user_profile_survey = json.dumps(sessions[session_id]["initial_user_profile_survey"])
+            existing_session.initial_tactic_analysis = sessions[session_id]["initial_tactic_analysis"]["full_analysis"]
+            existing_session.ui_event_log = json.dumps(ui_events)
+            existing_session.consent_accepted = consent_accepted
+            existing_session.session_status = "active"  # Change from pre_consent to active
+            existing_session.last_updated = datetime.utcnow()
+            # role and social_style already set from /get_or_assign_role
+
+            db_session.commit()
+            print(f"✅ Updated existing record for {session_id[:8]}... with full demographics")
+        except Exception as e:
+            print(f"❌ Error updating session record: {e}")
+            db_session.rollback()
+            raise HTTPException(status_code=500, detail="Failed to update session")
+    else:
+        # CREATE new initial database record
+        create_initial_session_record(sessions[session_id], db_session)
 
     return {"session_id": session_id, "message": "Study initialized. You can start the conversation."}
 
@@ -1627,7 +1830,11 @@ async def enter_waiting_room(request: Request, db_session: Session = Depends(get
 async def join_waiting_room(request: Request, db_session: Session = Depends(get_db)):
     """
     Called when user clicks "Enter Waiting Room" button.
-    ATOMICALLY assigns role + marks as waiting + attempts match.
+    Uses PRE-ASSIGNED role from page load (assigned via /get_or_assign_role).
+    Marks as waiting + attempts match.
+
+    CRITICAL: Role was already assigned on page load using atomic counter.
+    DO NOT re-assign role here or it will break the counter balance.
     """
     data = await request.json()
     session_id = data.get('session_id')
@@ -1640,34 +1847,31 @@ async def join_waiting_room(request: Request, db_session: Session = Depends(get_
 
     session = sessions[session_id]
 
-    # ATOMIC: Assign role + mark as waiting in one operation
-    assigned_role = assign_role_balanced(db_session)
+    # NEW: Use pre-assigned role (from /get_or_assign_role via /initialize_study)
+    # Role and social style were already set on page load for IRB compliance
+    assigned_role = session.get('role')
+    assigned_social_style = session.get('social_style')
+
+    if not assigned_role:
+        print(f"❌ ERROR: Session {session_id[:8]}... has no pre-assigned role")
+        raise HTTPException(status_code=500, detail="No role assigned. Please refresh and try again.")
+
     waiting_timestamp = datetime.utcnow()
 
-    # NEW: Assign social style to witnesses (same as AI gets)
-    assigned_social_style = None
-    if assigned_role == "witness":
-        # Randomly select social style from enabled styles
-        if DEBUG_FORCE_SOCIAL_STYLE and DEBUG_FORCE_SOCIAL_STYLE in ENABLED_SOCIAL_STYLES:
-            assigned_social_style = DEBUG_FORCE_SOCIAL_STYLE
-        else:
-            assigned_social_style = random.choice(ENABLED_SOCIAL_STYLES)
-        print(f"🎭 WITNESS SOCIAL STYLE: Session {session_id[:8]}... assigned style: {assigned_social_style}")
+    print(f"🎭 USING PRE-ASSIGNED ROLE: Session {session_id[:8]}... role={assigned_role}, social_style={assigned_social_style}")
 
-    # FIXED BUG #2: Update database FIRST before memory (true atomicity)
+    # Update database: Mark as waiting (role already stored from /initialize_study)
     try:
         session_record = db_session.query(db.StudySession).filter(
             db.StudySession.id == session_id
         ).first()
         if session_record:
-            session_record.role = assigned_role
+            # Role and social_style already set during /initialize_study
+            # Just update waiting status
             session_record.match_status = 'waiting'
             session_record.waiting_room_entered_at = waiting_timestamp
-            # NEW: Store social style for witnesses
-            if assigned_social_style:
-                session_record.social_style = assigned_social_style
             db_session.commit()
-            print(f"✅ Session {session_id[:8]}... assigned role: {assigned_role}, marked as waiting, DB updated")
+            print(f"✅ Session {session_id[:8]}... marked as waiting (role: {assigned_role}), DB updated")
         else:
             print(f"⚠️ WARNING: Session {session_id[:8]}... not found in database")
             raise HTTPException(status_code=404, detail="Session not found in database")
@@ -1678,8 +1882,7 @@ async def join_waiting_room(request: Request, db_session: Session = Depends(get_
         db_session.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-    # Only update memory if database write succeeded
-    session['role'] = assigned_role
+    # Update memory (role already set, just update match status)
     session['match_status'] = 'waiting'
     session['waiting_room_entered_at'] = waiting_timestamp
     # NEW: Store social style in memory for witnesses
@@ -2557,6 +2760,12 @@ async def submit_final_comment(data: FinalCommentRequest, db_session: Session = 
 
 @app.post("/finalize_no_session")
 async def finalize_no_session(data: FinalizeNoSessionRequest, db_session: Session = Depends(get_db)):
+    """
+    Called when participant drops out (e.g., declines consent, times out).
+
+    CRITICAL: If participant was assigned a role, we MUST decrement the counter
+    to prevent balancing against "ghost" users who declined.
+    """
     # Build a minimal session-like structure to persist
     participant_id_val = data.participant_id
     prolific_pid_val = data.prolific_pid or None
@@ -2572,7 +2781,45 @@ async def finalize_no_session(data: FinalizeNoSessionRequest, db_session: Sessio
             "session_id": None
         })
 
-    # NEW: Save dropout to database for tracking
+    # STEP 1: Check if participant was assigned a role
+    assigned_role = None
+    try:
+        existing_session = db_session.query(db.StudySession).filter(
+            db.StudySession.id == participant_id_val
+        ).first()
+
+        if existing_session and existing_session.role:
+            assigned_role = existing_session.role
+            print(f"⚠️ Participant {participant_id_val[:8]}... had role '{assigned_role}' assigned but dropped out")
+    except Exception as e:
+        print(f"Error checking for existing role: {e}")
+
+    # STEP 2: Decrement counter if role was assigned
+    if assigned_role:
+        try:
+            # Lock the counter row for atomic update
+            counter = db_session.query(db.RoleAssignmentCounter).filter(
+                db.RoleAssignmentCounter.id == 1
+            ).with_for_update().first()
+
+            if counter:
+                if assigned_role == "interrogator" and counter.interrogator_count > 0:
+                    counter.interrogator_count -= 1
+                    print(f"📉 Decremented interrogator count to {counter.interrogator_count}")
+                elif assigned_role == "witness" and counter.witness_count > 0:
+                    counter.witness_count -= 1
+                    print(f"📉 Decremented witness count to {counter.witness_count}")
+
+                db_session.commit()
+                print(f"✅ Counter updated: interrogator={counter.interrogator_count}, witness={counter.witness_count}")
+            else:
+                print("⚠️ RoleAssignmentCounter not found - skipping decrement")
+        except Exception as e:
+            print(f"❌ ERROR decrementing counter: {e}")
+            db_session.rollback()
+            # Continue to dropout save even if counter update fails
+
+    # STEP 3: Save dropout to database for tracking
     try:
         dropped_participant = db.DroppedParticipant(
             participant_id=participant_id_val,
