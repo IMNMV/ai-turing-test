@@ -1176,6 +1176,7 @@ class UIEventRequest(BaseModel):
 class FinalCommentRequest(BaseModel):
     session_id: str
     comment: str
+    binary_choice: Optional[str] = None  # NEW: For witnesses - 'human' or 'ai'
 
 class FinalizeNoSessionRequest(BaseModel):
     participant_id: str
@@ -2750,10 +2751,16 @@ async def submit_final_comment(data: FinalCommentRequest, db_session: Session = 
     session_record = db_session.query(db.StudySession).filter(db.StudySession.id == data.session_id).first()
     if not session_record:
         raise HTTPException(status_code=404, detail="Could not find the completed study session to add comment to.")
-    
+
     # Sanitize final comment
     sanitized_comment = html.escape(str(data.comment))
     session_record.final_user_comment = sanitized_comment
+
+    # NEW: Save witness binary choice if provided
+    if data.binary_choice:
+        session_record.final_binary_choice = data.binary_choice
+        print(f"Witness binary choice saved: {data.binary_choice}")
+
     db_session.commit()
     print(f"Final comment added to session {data.session_id}.")
     return {"message": "Final comment received. Thank you."}
