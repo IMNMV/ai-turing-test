@@ -82,6 +82,20 @@ class StudySession(Base):
     witness_instructions_version = Column(String, nullable=True)  # Track which instructions shown to witness
 
 
+class DroppedParticipant(Base):
+    """
+    Track participants who viewed the study but did not consent/complete.
+    Only stores minimal data since they didn't consent to full study.
+    """
+    __tablename__ = "dropped_participants"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    participant_id = Column(String, nullable=False, index=True)  # Internal UUID
+    prolific_pid = Column(String, nullable=True, index=True)  # Prolific ID (for payment tracking)
+    declined_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    reason = Column(String, nullable=False)  # e.g., "consent_disagreed", "timeout", etc.
+
+
 # Create tables - wrapped in try/except to prevent import failures
 try:
     Base.metadata.create_all(bind=engine)
