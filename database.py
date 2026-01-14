@@ -96,6 +96,18 @@ class DroppedParticipant(Base):
     reason = Column(String, nullable=False)  # e.g., "consent_disagreed", "timeout", etc.
 
 
+class RoleAssignmentCounter(Base):
+    """
+    Atomic counter for balancing interrogator/witness role assignments.
+    Single row table - incremented when roles assigned, decremented when consent declined.
+    """
+    __tablename__ = "role_assignment_counter"
+
+    id = Column(Integer, primary_key=True, default=1)
+    interrogator_count = Column(Integer, default=0, nullable=False)
+    witness_count = Column(Integer, default=0, nullable=False)
+
+
 # Create tables - wrapped in try/except to prevent import failures
 try:
     Base.metadata.create_all(bind=engine)
