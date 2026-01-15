@@ -2144,6 +2144,77 @@ async def check_session_status(session_id: str, db_session: Session = Depends(ge
     })
 
 
+@app.post("/report_abandonment")
+async def report_abandonment(request: Request, db_session: Session = Depends(get_db)):
+    """
+    Called via sendBeacon when user navigates away (refresh, back, close tab).
+    Marks abandoner's session and notifies their partner.
+    """
+    try:
+        data = await request.json()
+        session_id = data.get('session_id')
+        participant_id = data.get('participant_id')
+        prolific_pid = data.get('prolific_pid')
+        reason = data.get('reason', 'navigation_abandonment')
+
+        print(f"🚨 ABANDONMENT REPORTED: session_id={session_id[:8] if session_id else 'None'}..., reason={reason}")
+
+        # Find session record
+        session_record = None
+        if session_id:
+            session_record = db_session.query(db.StudySession).filter(
+                db.StudySession.id == session_id
+            ).first()
+        elif participant_id:
+            # Try to find by participant_id if session_id not available
+            session_record = db_session.query(db.StudySession).filter(
+                db.StudySession.id == participant_id
+            ).first()
+
+        if session_record:
+            # Mark as abandoned
+            session_record.session_status = 'abandoned'
+            session_record.last_updated = datetime.utcnow()
+
+            # Find partner and notify them
+            partner_id = session_record.matched_session_id
+            if partner_id:
+                # Mark partner's session as partner_dropped
+                partner_record = db_session.query(db.StudySession).filter(
+                    db.StudySession.id == partner_id
+                ).first()
+                if partner_record:
+                    partner_record.match_status = 'partner_dropped'
+                    print(f"✅ Partner {partner_id[:8]}... notified of abandonment")
+
+                # Update in-memory sessions
+                if partner_id in sessions:
+                    sessions[partner_id]['match_status'] = 'partner_dropped'
+
+            db_session.commit()
+            print(f"✅ Abandonment logged for {session_id[:8] if session_id else participant_id[:8]}...")
+
+        # Also save to DroppedParticipant table
+        try:
+            dropped = db.DroppedParticipant(
+                participant_id=participant_id or session_id,
+                prolific_pid=prolific_pid,
+                reason=reason
+            )
+            db_session.add(dropped)
+            db_session.commit()
+        except Exception as e:
+            print(f"⚠️ Could not save to DroppedParticipant (may already exist): {e}")
+            db_session.rollback()
+
+        return JSONResponse(content={"message": "Abandonment logged"}, status_code=200)
+
+    except Exception as e:
+        print(f"❌ Error in report_abandonment: {e}")
+        # Always return 200 for beacon (even on error - beacon can't retry)
+        return JSONResponse(content={"message": "Error logged"}, status_code=200)
+
+
 @app.post("/report_partner_dropped")
 async def report_partner_dropped(request: Request, db_session: Session = Depends(get_db)):
     """
