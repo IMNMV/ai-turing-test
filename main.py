@@ -1510,11 +1510,13 @@ async def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session =
             assigned_role = "witness"
             counter.witness_count += 1
         else:
-            # Equal counts - randomly assign
-            assigned_role = random.choice(["interrogator", "witness"])
-            if assigned_role == "interrogator":
+            # Equal counts - alternate deterministically based on total
+            total = counter.interrogator_count + counter.witness_count
+            if total % 2 == 0:
+                assigned_role = "interrogator"
                 counter.interrogator_count += 1
             else:
+                assigned_role = "witness"
                 counter.witness_count += 1
 
         # Assign social style if witness
