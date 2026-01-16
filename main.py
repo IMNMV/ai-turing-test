@@ -1136,6 +1136,7 @@ class ChatRequest(BaseModel):
     message: str
     typing_indicator_delay_seconds: Optional[float] = None
     network_delay_seconds: Optional[float] = None
+    message_composition_time_seconds: Optional[float] = None  # Time from first keystroke to send
 
 class ConversationStartRequest(BaseModel):
     session_id: str
@@ -2294,7 +2295,8 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
             "user": user_message,
             "assistant": "",  # No AI response
             "sender_role": session.get('role', 'unknown'),
-            "timestamp": datetime.utcnow().timestamp()
+            "timestamp": datetime.utcnow().timestamp(),
+            "message_composition_time_seconds": data.message_composition_time_seconds  # Time to type message
         }
 
         session["conversation_log"].append(turn_data)
@@ -2498,7 +2500,8 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
             "api_call_time_seconds": time_spent_on_actual_ai_calls,
             "sleep_duration_seconds": sleep_duration_needed,
             "typing_indicator_delay_seconds": data.typing_indicator_delay_seconds,
-            "network_delay_seconds": None  # Will be updated by separate network delay endpoint
+            "network_delay_seconds": None,  # Will be updated by separate network delay endpoint
+            "message_composition_time_seconds": data.message_composition_time_seconds  # Time from first keystroke to send
         }
     }
 
