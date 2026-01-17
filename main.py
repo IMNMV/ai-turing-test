@@ -40,6 +40,12 @@ RESPONSE_DELAY_PER_PREV_CHAR_STD = 0.001 # Std dev for per previous character de
 RESPONSE_DELAY_THINKING_SHAPE = 2.5   # Gamma distribution shape parameter (k)
 RESPONSE_DELAY_THINKING_SCALE = 0.4  # Gamma distribution scale parameter (theta) - thinking time
 
+# --- HUMAN MODE MESSAGE DELAY CONFIGURATION ---
+# To match AI mode timing and maintain blinding
+HUMAN_MESSAGE_DELAY_MEAN = 25.0      # Mean delay in seconds (target ~25s to match AI mode)
+HUMAN_MESSAGE_DELAY_STD = 2.5        # Standard deviation (gives variety ~19-26s after ceiling)
+HUMAN_MESSAGE_DELAY_CEILING = 26.0   # Maximum delay in seconds (hard cap)
+
 
 # --- DEBUG SWITCH FOR PERSONA ---
 #DEBUG_FORCE_PERSONA = None # For randomization
@@ -2049,6 +2055,22 @@ async def check_partner_message(session_id: str, db_session: Session = Depends(g
         latest_message = partner['conversation_log'][-1] if partner['conversation_log'] else None
 
         if latest_message:
+            # NEW: Check if message has passed its delivery time (artificial delay for human mode)
+            delivery_time = latest_message.get('delivery_time')
+            current_time = time.time()
+
+            if delivery_time and current_time < delivery_time:
+                # Message not ready yet - still in artificial delay period
+                remaining_delay = delivery_time - current_time
+                print(f"⏳ MESSAGE DELAYED: {partner_id[:8]}... -> {session_id[:8]}... | {remaining_delay:.2f}s remaining")
+
+                return JSONResponse(content={
+                    "new_message": False,
+                    "partner_typing": True,  # NEW: Signal that partner is "typing" (artificial delay)
+                    "partner_dropped": False,
+                    "study_completed": False
+                })
+
             # SAFETY: Verify turn numbers match (detect gaps)
             if partner_turn - my_turn > 1:
                 print(f"⚠️ MESSAGE GAP: Session {session_id[:8]}... - Partner turn {partner_turn}, my turn {my_turn}")
@@ -2298,14 +2320,26 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         partner = sessions[partner_session_id]
         current_turn = session["turn_count"] + 1
 
+        # NEW: Calculate artificial delay to match AI mode timing
+        # Sample from normal distribution, clamp at ceiling
+        delay_seconds = np.random.normal(HUMAN_MESSAGE_DELAY_MEAN, HUMAN_MESSAGE_DELAY_STD)
+        delay_seconds = min(delay_seconds, HUMAN_MESSAGE_DELAY_CEILING)
+        delay_seconds = max(delay_seconds, 0)  # Don't allow negative delays
+
+        # Calculate when this message should be delivered to partner
+        sent_time = datetime.utcnow().timestamp()
+        delivery_time = sent_time + delay_seconds
+
         # Add message to both conversation logs
         turn_data = {
             "turn": current_turn,
             "user": user_message,
             "assistant": "",  # No AI response
             "sender_role": session.get('role', 'unknown'),
-            "timestamp": datetime.utcnow().timestamp(),
-            "message_composition_time_seconds": data.message_composition_time_seconds  # Time to type message
+            "timestamp": sent_time,
+            "message_composition_time_seconds": data.message_composition_time_seconds,  # Time to type message
+            "delivery_time": delivery_time,  # NEW: When message should be delivered to partner
+            "artificial_delay_seconds": delay_seconds  # NEW: For analysis
         }
 
         session["conversation_log"].append(turn_data)
@@ -2314,13 +2348,14 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         # Save to database
         update_session_after_message(session, db_session)
 
-        print(f"Human-human message routed: {session.get('role')} ({session_id[:8]}...) -> {partner.get('role')} ({partner_session_id[:8]}...)")
+        print(f"Human-human message sent: {session.get('role')} ({session_id[:8]}...) -> {partner.get('role')} ({partner_session_id[:8]}...) | Delay: {delay_seconds:.2f}s")
 
         return {
             "human_partner": True,
             "message_routed": True,
             "turn": current_turn,
-            "timestamp": datetime.utcnow().timestamp()
+            "timestamp": sent_time,
+            "artificial_delay_seconds": delay_seconds  # Return to frontend for bubble timing
         }
 
     # AI_WITNESS mode or no human partner - proceed with AI generation
