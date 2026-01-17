@@ -1995,6 +1995,15 @@ async def check_partner_message(session_id: str, db_session: Session = Depends(g
     if not partner_id:
         raise HTTPException(status_code=400, detail="No partner matched")
 
+    # NEW: Check if THIS session has been marked as partner_dropped (partner abandoned)
+    if session.get('match_status') == 'partner_dropped':
+        print(f"🚨 THIS SESSION MARKED AS PARTNER_DROPPED: {session_id[:8]}...")
+        return JSONResponse(content={
+            "new_message": False,
+            "partner_dropped": True,
+            "study_completed": False
+        })
+
     # Check if partner session exists
     partner = sessions.get(partner_id)
     if not partner:
