@@ -724,9 +724,13 @@ async def select_tactic_for_current_turn(
     history_for_prompt_lines = []
     if conversation_log_history:
         for entry in conversation_log_history:
-            history_for_prompt_lines.append(f"Turn {entry['turn']} User: {entry['user']}")
+            user_ts = entry.get('user_timestamp', '')
+            user_ts_str = f" [{user_ts}]" if user_ts else ""
+            history_for_prompt_lines.append(f"Turn {entry['turn']} User{user_ts_str}: {entry['user']}")
             if 'assistant' in entry and entry['assistant']:
-                 history_for_prompt_lines.append(f"Turn {entry['turn']} AI (used tactic: {entry.get('tactic_used', 'N/A')}): {entry['assistant']}")
+                ai_ts = entry.get('assistant_timestamp', '')
+                ai_ts_str = f" [{ai_ts}]" if ai_ts else ""
+                history_for_prompt_lines.append(f"Turn {entry['turn']} AI{ai_ts_str} (used tactic: {entry.get('tactic_used', 'N/A')}): {entry['assistant']}")
 
     if not history_for_prompt_lines:
         history_str = "No prior completed conversation turns. The AI is about to craft its first tactic-driven response."
@@ -2482,7 +2486,12 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
 
     simple_history_for_your_prompt = []
     for entry in session["conversation_log"]:
-        simple_history_for_your_prompt.append({"user": entry["user"], "assistant": entry.get("assistant", "")})
+        simple_history_for_your_prompt.append({
+            "user": entry["user"],
+            "user_timestamp": entry.get("user_timestamp", ""),
+            "assistant": entry.get("assistant", ""),
+            "assistant_timestamp": entry.get("assistant_timestamp", "")
+        })
 
     # NEW: Retry logic for AI response generation
     max_retries = 3
@@ -2614,10 +2623,16 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
             existing_turn_idx = idx
             break
 
+    # Capture timestamps for context memory
+    user_message_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ai_response_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     turn_data = {
         "turn": current_ai_response_turn,
         "user": user_message,
+        "user_timestamp": user_message_timestamp,
         "assistant": ai_response_text,
+        "assistant_timestamp": ai_response_timestamp,
         "tactic_used": tactic_key_for_this_turn,
         "tactic_selection_justification": tactic_sel_justification,
         "timing": {
