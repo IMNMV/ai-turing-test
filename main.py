@@ -1472,7 +1472,8 @@ async def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session =
         print(f"✅ AI_WITNESS mode: Assigning interrogator role (no counter)")
         return {
             "role": "interrogator",
-            "is_existing": False
+            "is_existing": False,
+            "study_mode": STUDY_MODE
         }
 
     # STEP 1: Check if participant already has a role assigned (for refresh scenarios)
@@ -1487,7 +1488,8 @@ async def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session =
 
         response_data = {
             "role": existing_session.role,
-            "is_existing": True
+            "is_existing": True,
+            "study_mode": STUDY_MODE
         }
 
         # Include social style info if witness
@@ -1582,7 +1584,8 @@ async def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session =
         # Return role assignment
         response_data = {
             "role": assigned_role,
-            "is_existing": False
+            "is_existing": False,
+            "study_mode": STUDY_MODE
         }
 
         if assigned_role == "witness":
