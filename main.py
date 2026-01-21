@@ -41,10 +41,17 @@ RESPONSE_DELAY_THINKING_SHAPE = 2.5   # Gamma distribution shape parameter (k)
 RESPONSE_DELAY_THINKING_SCALE = 0.4  # Gamma distribution scale parameter (theta) - thinking time
 
 # --- HUMAN MODE MESSAGE DELAY CONFIGURATION ---
-# To match AI mode timing and maintain blinding
-HUMAN_MESSAGE_DELAY_MEAN = 25.0      # Mean delay in seconds (target ~25s to match AI mode)
-HUMAN_MESSAGE_DELAY_STD = 2.5        # Standard deviation (gives variety ~19-26s after ceiling)
-HUMAN_MESSAGE_DELAY_CEILING = 26.0   # Maximum delay in seconds (hard cap)
+# Based on observed human typing delays from empirical data
+# Using median values (less sensitive to outliers) and observed standard deviations
+HUMAN_MESSAGE_DELAY_BY_LENGTH = {
+    # (min_words, max_words): (median_delay, std_dev)
+    (1, 5):    (14.8, 5.92),   # 1-5 words: median 14.8s, sd 5.92s
+    (6, 10):   (22.9, 8.79),   # 6-10 words: median 22.9s, sd 8.79s
+    (11, 20):  (19.4, 8.80),   # 11-20 words: median 19.4s, sd 8.80s
+    (21, 40):  (19.1, 4.17),   # 21-40 words: median 19.1s, sd 4.17s
+    (41, 999): (19.1, 4.17),   # 40+ words: use same as 21-40 (rare case)
+}
+HUMAN_MESSAGE_DELAY_CEILING = 23.0   # Maximum delay in seconds (keeps delays consistent with AI mode timing)
 
 
 # --- DEBUG SWITCH FOR PERSONA ---
@@ -2320,11 +2327,21 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         partner = sessions[partner_session_id]
         current_turn = session["turn_count"] + 1
 
-        # NEW: Calculate artificial delay to match AI mode timing
-        # Sample from normal distribution, clamp at ceiling
-        delay_seconds = np.random.normal(HUMAN_MESSAGE_DELAY_MEAN, HUMAN_MESSAGE_DELAY_STD)
-        delay_seconds = min(delay_seconds, HUMAN_MESSAGE_DELAY_CEILING)
-        delay_seconds = max(delay_seconds, 0)  # Don't allow negative delays
+        # NEW: Calculate artificial delay based on message length (empirical data)
+        # Count words in message
+        word_count = len(user_message.split())
+
+        # Find appropriate delay parameters based on word count
+        median_delay, std_delay = (19.1, 4.17)  # Default to 21-40 words category
+        for (min_words, max_words), (median, std) in HUMAN_MESSAGE_DELAY_BY_LENGTH.items():
+            if min_words <= word_count <= max_words:
+                median_delay, std_delay = median, std
+                break
+
+        # Sample from normal distribution using median and observed std dev
+        delay_seconds = np.random.normal(median_delay, std_delay)
+        delay_seconds = min(delay_seconds, HUMAN_MESSAGE_DELAY_CEILING)  # Clamp at ceiling
+        delay_seconds = max(delay_seconds, 5.0)  # Minimum 5s delay to prevent unrealistically fast responses
 
         # Calculate when this message should be delivered to partner
         sent_time = datetime.utcnow().timestamp()
@@ -2339,7 +2356,10 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
             "timestamp": sent_time,
             "message_composition_time_seconds": data.message_composition_time_seconds,  # Time to type message
             "delivery_time": delivery_time,  # NEW: When message should be delivered to partner
-            "artificial_delay_seconds": delay_seconds  # NEW: For analysis
+            "artificial_delay_seconds": delay_seconds,  # NEW: For analysis
+            "message_word_count": word_count,  # NEW: For analysis - correlate delay with length
+            "delay_category_median": median_delay,  # NEW: Which category was used
+            "delay_category_std": std_delay  # NEW: Std dev for the category
         }
 
         session["conversation_log"].append(turn_data)
@@ -2348,7 +2368,7 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         # Save to database
         update_session_after_message(session, db_session)
 
-        print(f"Human-human message sent: {session.get('role')} ({session_id[:8]}...) -> {partner.get('role')} ({partner_session_id[:8]}...) | Delay: {delay_seconds:.2f}s")
+        print(f"Human-human message sent: {session.get('role')} ({session_id[:8]}...) -> {partner.get('role')} ({partner_session_id[:8]}...) | Words: {word_count}, Delay: {delay_seconds:.2f}s (median={median_delay:.1f}s)")
 
         return {
             "human_partner": True,
