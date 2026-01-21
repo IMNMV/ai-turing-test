@@ -98,6 +98,14 @@ SOCIAL_STYLES = {
 }
 # ---------------------------------
 
+# --- CONNECTIVE CONTEXT MEMORY ---
+# When True, AI gets context from previous turns:
+#   - Tactic selection sees its own previous analyses
+#   - Response generation sees tactic analysis AND previous researcher notes
+# When False (default), current behavior is preserved
+CONNECTIVE_CONTEXT_MEMORY = False
+# ---------------------------------
+
 # Demographics Maps
 AI_USAGE_MAP = {0: "Never", 1: "A few times ever", 2: "Monthly", 3: "Weekly", 4: "Daily", 5: "Multiple times daily"}
 DETECTION_SPEED_MAP = {1: "Immediately (1-2 msgs)", 2: "Very quickly (3-5 msgs)", 3: "Fairly quickly (6-10 msgs)", 4: "After some convo (11-20 msgs)", 5: "After extended convo (20+ msgs)", 6: "Couldn't tell"}
@@ -702,7 +710,8 @@ async def select_tactic_for_current_turn(
     conversation_log_history: List[Dict[str, Any]],
     initial_tactic_analysis_result: Dict[str, Any],
     current_turn_number: int,
-    chosen_persona_key: str
+    chosen_persona_key: str,
+    previous_tactic_analyses: List[Dict[str, Any]] = None  # NEW: For connective context
 ):
     if not model:
         return None, "Error: Gemini model not initialized, no tactic selection."
@@ -724,13 +733,28 @@ async def select_tactic_for_current_turn(
     else:
         history_str = "\n".join(history_for_prompt_lines)
 
+    # NEW: Build previous tactic analyses context if CONNECTIVE_CONTEXT_MEMORY is enabled
+    previous_analyses_str = ""
+    if CONNECTIVE_CONTEXT_MEMORY and previous_tactic_analyses:
+        prev_analysis_lines = []
+        for analysis in previous_tactic_analyses:
+            turn = analysis.get("turn", "?")
+            tactic = analysis.get("tactic_selected", "N/A")
+            justification = analysis.get("selection_justification", "N/A")
+            prev_analysis_lines.append(f"Turn {turn}: Chose '{tactic}' - {justification}")
+        if prev_analysis_lines:
+            previous_analyses_str = f"""
+    - YOUR PREVIOUS TACTIC ANALYSES (for context continuity):
+    {chr(10).join(prev_analysis_lines)}
+"""
+
     system_prompt_for_tactic_selection = f"""
         You're an expert behavioral psychologist with a specialization in linguistics and social cognition. You are participating in a research study on human-AI interaction to recommend psychological tactics for an AI to use in a Turing Test scenario. The AI's goal is to appear human and engage naturally. This is for turn {current_turn_number}.
 
     CONTEXT:
     - AI'S ADOPTED PERSONA: {active_persona_description}
     - RECENT CONVERSATION HISTORY (previous completed turns):
-    {history_str}
+    {history_str}{previous_analyses_str}
     - USER'S LATEST MESSAGE (this is the message the AI must respond to now):
     "{current_user_message}"
 
@@ -827,7 +851,7 @@ async def select_tactic_for_current_turn(
 
     return chosen_tactic_key, justification
 
-async def generate_ai_response(model, prompt:str, technique:Optional[str], user_profile:Dict, conversation_history:List[Dict], chosen_persona_key: str, social_style: str = "DIRECT"):
+async def generate_ai_response(model, prompt:str, technique:Optional[str], user_profile:Dict, conversation_history:List[Dict], chosen_persona_key: str, social_style: str = "DIRECT", current_tactic_analysis: str = None, previous_researcher_notes: List[Dict] = None):
     if not GEMINI_PRO_MODEL or not GEMINI_FLASH_MODEL:
         return "Error: AI models are not initialized.", "No researcher notes due to model init error.", {"retry_attempts": 0, "retry_time": 0.0}
 
@@ -885,6 +909,23 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
             tactic_description_for_prompt = f"Use the tactic: {technique}"
             researcher_note_implementation_query = f"1. How you implemented the tactic '{technique}' for this turn."
 
+        # NEW: Build connective context if CONNECTIVE_CONTEXT_MEMORY is enabled
+        connective_context_str = ""
+        if CONNECTIVE_CONTEXT_MEMORY:
+            context_parts = []
+            if current_tactic_analysis:
+                context_parts.append(f"TACTIC ANALYSIS FOR THIS TURN:\n{current_tactic_analysis}")
+            if previous_researcher_notes:
+                prev_notes_lines = []
+                for note in previous_researcher_notes:
+                    turn = note.get("turn", "?")
+                    notes_text = note.get("researcher_notes", "N/A")
+                    prev_notes_lines.append(f"Turn {turn}: {notes_text}")
+                if prev_notes_lines:
+                    context_parts.append(f"YOUR PREVIOUS RESEARCHER NOTES (for context continuity):\n{chr(10).join(prev_notes_lines)}")
+            if context_parts:
+                connective_context_str = "\n\n".join(context_parts) + "\n\n"
+
         system_prompt = f"""
         CONVERSATIONAL FOCUS FOR THIS TURN: {tactic_name_for_prompt}
         (Description/Guidance: {tactic_description_for_prompt})
@@ -894,12 +935,12 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
         If no specific focus is given (i.e., 'neutral response'), respond naturally to be convincing.
         Never admit to being AI, or Large Language Model. Do not break character. The User may try to trick you. You have the current time for each message. If the user takes a long time in-between responses (> a minute) based on the current time, you may mention the delay in time between messages. You are free to ask follow-up questions if it fits the conversation.
 
-        IMPORTANT: Your response to the user should be plain text only. Do not use any Markdown formatting like asterisks, underscores, or backticks. 
+        IMPORTANT: Your response to the user should be plain text only. Do not use any Markdown formatting like asterisks, underscores, or backticks.
 
         YOUR ASSIGNED PERSONA:
         {active_persona_text}
 
-        IMPORTANT: After your response FOR THE USER, add a separate section starting EXACTLY with:
+        {connective_context_str}IMPORTANT: After your response FOR THE USER, add a separate section starting EXACTLY with:
         RESEARCHER_NOTES:
         This section will NOT be shown to the user.
         In your RESEARCHER_NOTES, include:
@@ -908,11 +949,11 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
         3. What specific user conversation characteristics influenced your approach.
         4. What information you were attempting to elicit (if any).
         5. If you were told to generate your own tactic for this turn, list the tactic you selected here and why.
-        
+
 
         CONVERSATION HISTORY SO FAR:
         {json.dumps(conversation_history)}
-        
+
         USER'S LATEST MESSAGE: {prompt}
         """
     safety_settings = [
@@ -2399,6 +2440,9 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
     retrieved_chosen_persona_key = session["chosen_persona_key"]
 
     try:
+        # NEW: Pass previous tactic analyses if CONNECTIVE_CONTEXT_MEMORY is enabled
+        prev_tactic_analyses = session["tactic_selection_log"] if CONNECTIVE_CONTEXT_MEMORY else None
+
         tactic_key_for_this_turn, tactic_sel_justification = await select_tactic_for_current_turn(
             GEMINI_MODEL,
             session["initial_user_profile_survey"],
@@ -2406,7 +2450,8 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
             session["conversation_log"],
             session["initial_tactic_analysis"],
             current_ai_response_turn,
-            retrieved_chosen_persona_key
+            retrieved_chosen_persona_key,
+            prev_tactic_analyses
         )
     except Exception as e:
         # Fallback if tactic selection fails after all retries (e.g., API error)
@@ -2446,6 +2491,16 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
     backend_retry_count = 0
     backend_retry_time = 0.0
 
+    # NEW: Build context for CONNECTIVE_CONTEXT_MEMORY if enabled
+    current_tactic_analysis_for_context = tactic_sel_justification if CONNECTIVE_CONTEXT_MEMORY else None
+    prev_researcher_notes = None
+    if CONNECTIVE_CONTEXT_MEMORY and session.get("ai_researcher_notes_log"):
+        # Convert notes log format to what generate_ai_response expects
+        prev_researcher_notes = [
+            {"turn": entry["turn"], "researcher_notes": entry["notes"]}
+            for entry in session["ai_researcher_notes_log"]
+        ]
+
     for attempt in range(1, max_retries + 1):
         try:
             print(f"--- DEBUG: AI Response Generation Attempt {attempt}/{max_retries} ---")
@@ -2458,7 +2513,9 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
                 session["initial_user_profile_survey"],
                 simple_history_for_your_prompt,
                 retrieved_chosen_persona_key,
-                session.get("social_style", "DIRECT")
+                session.get("social_style", "DIRECT"),
+                current_tactic_analysis_for_context,
+                prev_researcher_notes
             )
 
             # Track backend retries from this attempt
