@@ -1248,7 +1248,16 @@ def attempt_match(db_session: Session) -> Optional[Dict[str, str]]:
 
         db_session.commit()
 
-        print(f"Match created: Interrogator {interrogator.id[:8]}... <-> Witness {witness.id[:8]}... (first sender: {first_sender})")
+        # Log match with witness social style
+        witness_style = witness.social_style or "N/A"
+        print("=" * 60)
+        print(f"👥 HUMAN MODE MATCH CREATED")
+        print(f"   Interrogator: {interrogator.id[:8]}...")
+        print(f"   Witness: {witness.id[:8]}...")
+        print(f"   Witness Social Style: {witness_style}")
+        print(f"   First sender: {first_sender}")
+        print(f"   Proceed at: {proceed_to_chat_at.strftime('%H:%M:%S')} UTC")
+        print("=" * 60)
 
         return {
             'interrogator_sid': interrogator.id,
@@ -1776,7 +1785,14 @@ async def enter_waiting_room(request: Request, db_session: Session = Depends(get
             session_record.match_status = 'waiting'  # Will be updated when chat starts
             db_session.commit()
 
-        print(f"Session {session_id[:8]}... will show waiting room (AI mode - simulated match)")
+        # Log AI mode with social style
+        ai_social_style = session.get('social_style', 'DIRECT')
+        print("=" * 60)
+        print(f"🤖 AI MODE SESSION STARTING")
+        print(f"   Session: {session_id[:8]}...")
+        print(f"   Role: interrogator (vs AI witness)")
+        print(f"   Social Style: {ai_social_style}")
+        print("=" * 60)
 
         return JSONResponse(content={
             "ai_partner": True,
@@ -2467,7 +2483,8 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
                 break
 
     ai_text_length = len(ai_response_text)
-    print(f"--- DEBUG (Turn {current_ai_response_turn}, Session {session_id}): Persona: {retrieved_chosen_persona_key} | Tactic: {tactic_key_for_this_turn or 'None'} | AI Resp Len: {ai_text_length}c ---")
+    current_social_style = session.get("social_style", "DIRECT")
+    print(f"--- DEBUG (Turn {current_ai_response_turn}, Session {session_id[:8]}...): Style: {current_social_style} | Tactic: {tactic_key_for_this_turn or 'None'} | AI Resp Len: {ai_text_length}c ---")
 
     time_spent_on_actual_ai_calls = time.time() - actual_ai_processing_start_time
 
@@ -2623,7 +2640,24 @@ async def log_conversation_start(data: ConversationStartRequest, db_session: Ses
             session_record.matched_at = datetime.utcnow()
             db_session.commit()
 
-    print(f"Conversation start logged for session {session_id}")
+    # Comprehensive conversation start logging
+    role = session.get('role', 'unknown')
+    social_style = session.get('social_style', 'N/A')
+    is_ai_mode = session.get('matched_session_id') is None
+    mode_str = "AI_WITNESS" if is_ai_mode else "HUMAN_WITNESS"
+
+    print("=" * 60)
+    print(f"💬 CONVERSATION STARTED")
+    print(f"   Session: {session_id[:8]}...")
+    print(f"   Mode: {mode_str}")
+    print(f"   Role: {role}")
+    print(f"   Social Style: {social_style}")
+    if not is_ai_mode:
+        partner_id = session.get('matched_session_id', 'unknown')
+        print(f"   Partner: {partner_id[:8] if partner_id else 'N/A'}...")
+    print(f"   Timestamp: {datetime.utcnow().isoformat()}Z")
+    print("=" * 60)
+
     return {"message": "Conversation start time logged"}
 
 @app.post("/update_network_delay")
