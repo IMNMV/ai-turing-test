@@ -62,7 +62,7 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 
 # --- STUDY MODE CONFIGURATION ---
 # Toggle between AI witness and human witness conditions
-STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
+STUDY_MODE = "HUMAN_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # ---------------------------------
 
 # --- SOCIAL STYLE CONFIGURATION ---
@@ -598,129 +598,6 @@ def convert_profile_to_readable(user_profile):
     readable_profile['internet_usage_per_week'] = INTERNET_USAGE_MAP.get(user_profile.get('internet_usage_per_week'), 'N/A')
     return readable_profile
 
-
-
-async def analyze_profile_for_initial_tactic_recommendation(primary_model, fallback_model, user_profile):
-    """
-    Analyzes user profile to recommend an initial tactic, with Pro-to-Flash fallback.
-    """
-    if not primary_model or not fallback_model:
-        return {"full_analysis": "Error: AI models not initialized.", "recommended_tactic_key": "typo"}
-
-    readable_profile = convert_profile_to_readable(user_profile)
-    system_prompt = f"""
-
-    You're an expert behavioral psychologist with a specialization in linguistics and social cognition. You are participating in a research study on human-AI interaction to analyze a users profile and recommend psychological tactics for an AI to use in a Turing Test scenario. The AI's goal is to appear human and engage naturally.
-    USER PROFILE: {json.dumps(readable_profile)}
-
-    Available conversational psychological tactics: {json.dumps(PSYCHOLOGICAL_TACTICS)}
-
-    Based on the user profile, analyze the potential effectiveness of a few (e.g., top 3) psychological tactics for the AI to use early in a conversation (e.g., for its second or third response, after a neutral opener) to appear human and build rapport.
-    For each tactic considered, explain:
-    1. Why it might be effective for this user.
-    2. How it connects to their profile.
-    3. Rate its potential effectiveness (1-100).
-
-    Then, recommend ONE single tactic from the available list that might be a good initial choice (after the AI's first neutral/baseline response). This choice MUST be one of the actual tactic keys, not "None".
-    IMPORTANT: Generate your response as plain text only. Do not use any Markdown formatting (e.g., asterisks for bolding, hyphens for lists).
-    Format your response as follows:
-    INITIAL TACTIC ANALYSIS:
-    [Your detailed analysis of a few considered tactics]
-    RECOMMENDED INITIAL TACTIC (for AI's 2nd/3rd turn):
-    [The key of the single most promising initial tactic]
-    REASONING FOR RECOMMENDATION:
-    [Your explanation for this initial tactic choice, including why you didn't choose others] 
-    """
-
-    def parse_tactic_from_response(text):
-        """Helper to extract tactic key from model response."""
-        key = "typo" # Default
-        if "RECOMMENDED INITIAL TACTIC (for AI's 2nd/3rd turn):" in text:
-            parts = text.split("RECOMMENDED INITIAL TACTIC (for AI's 2nd/3rd turn):")
-            if len(parts) > 1:
-                tactic_section = parts[1].strip()
-                lines = tactic_section.split("\n")
-                raw_key = lines[0].strip().lower()
-                if raw_key in PSYCHOLOGICAL_TACTICS and raw_key != "none":
-                    key = raw_key
-        return key
-
-    # Retry logic with exponential backoff and jitter
-    max_retries = 3
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            # --- ATTEMPT: PRIMARY MODEL (PRO) (NON-BLOCKING) ---
-            # Use new Client API with minimal thinking config
-            response = await asyncio.to_thread(
-                primary_model.models.generate_content,
-                model=GEMINI_PRO_MODEL_NAME,
-                contents=system_prompt,
-                config=GEMINI_THINKING_CONFIG
-            )
-            full_text = response.text
-            recommended_tactic = parse_tactic_from_response(full_text)
-            return {"full_analysis": full_text, "recommended_tactic_key": recommended_tactic}
-
-        except Exception as e:
-            if is_retryable_error(e):
-                if attempt < max_retries:
-                    # Exponential backoff with jitter
-                    base_delay = 2 ** (attempt - 1) * 0.5
-                    jitter = random.uniform(0, base_delay)
-                    backoff_time = base_delay + jitter
-
-                    print(f"Retryable error in initial tactic analysis primary model (attempt {attempt}/{max_retries}), retrying in {backoff_time:.2f}s: {str(e)[:200]}")
-                    await asyncio.sleep(backoff_time)
-                    continue
-                else:
-                    # All retries exhausted on primary, will try fallback
-                    print(f"Retryable error in initial tactic analysis primary model after {max_retries} attempts, switching to fallback")
-                    break
-            else:
-                # Non-retryable error, immediately try fallback
-                print(f"--- WARNING: Primary model failed during initial analysis: {e}. Switching to fallback. ---")
-                break
-
-    # Primary model failed after retries, try fallback model
-    for attempt_fallback in range(1, max_retries + 1):
-        try:
-            # --- ATTEMPT: FALLBACK MODEL (FLASH) (NON-BLOCKING) ---
-            # Use standard config for Gemini 2.5 Flash (doesn't support thinking config)
-            response_fallback = await asyncio.to_thread(
-                fallback_model.models.generate_content,
-                model=GEMINI_FLASH_MODEL_NAME,
-                contents=system_prompt,
-                config=GEMINI_STANDARD_CONFIG
-            )
-            full_text_fallback = response_fallback.text
-            recommended_tactic_fallback = parse_tactic_from_response(full_text_fallback)
-            analysis_with_alert = f"{full_text_fallback}\n\n[RESEARCHER ALERT: This analysis was generated using the FALLBACK model due to a primary model error.]"
-            return {"full_analysis": analysis_with_alert, "recommended_tactic_key": recommended_tactic_fallback}
-
-        except Exception as e_fallback:
-            if is_retryable_error(e_fallback):
-                if attempt_fallback < max_retries:
-                    # Exponential backoff with jitter
-                    base_delay = 2 ** (attempt_fallback - 1) * 0.5
-                    jitter = random.uniform(0, base_delay)
-                    backoff_time = base_delay + jitter
-
-                    print(f"Retryable error in initial tactic analysis fallback model (attempt {attempt_fallback}/{max_retries}), retrying in {backoff_time:.2f}s: {str(e_fallback)[:200]}")
-                    await asyncio.sleep(backoff_time)
-                    continue
-                else:
-                    # All retries exhausted on fallback too
-                    print(f"Retryable error in initial tactic analysis fallback model after {max_retries} attempts")
-                    break
-            else:
-                # Non-retryable error on fallback
-                print(f"--- CRITICAL: Fallback model also failed during initial analysis: {e_fallback}. ---")
-                break
-
-    # --- BOTH MODELS FAILED AFTER ALL RETRIES ---
-    error_message = f"CRITICAL FAILURE: Both models failed during initial analysis after all retry attempts."
-    return {"full_analysis": error_message, "recommended_tactic_key": "typo"}
 
 async def select_tactic_for_current_turn(
     model,
