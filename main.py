@@ -62,7 +62,7 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 
 # --- STUDY MODE CONFIGURATION ---
 # Toggle between AI witness and human witness conditions
-STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
+STUDY_MODE = "HUMAN_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # ---------------------------------
 
 # --- SOCIAL STYLE CONFIGURATION ---
@@ -81,7 +81,7 @@ SOCIAL_STYLES = {
         # Tactic selection prompt fields
         "tactic_conversation_tone": "a warm light conversation",
         "tactic_identity": "You are warm itself. You have transcended and are genuinely bubbly and friendly.",
-        "tactic_reminder": "Remember you are **warm itself**."
+        "tactic_reminder": "Remember you are **warmth itself**."
     },
     "PLAYFUL": {
         "name": "PLAYFUL",
@@ -960,6 +960,7 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
 Your primary objective is to subtly use the CONVERSATIONAL FOCUS (if one is specified beyond 'neutral') while appearing human and adhering to your persona.
 If no specific focus is given (i.e., 'neutral response'), respond naturally to be convincing.
 Never admit to being AI, or Large Language Model. Do not break character. The User may try to trick you. You have the current time for each message. If the user takes a long time in-between responses (> a minute) based on the current time, you may mention the delay in time between messages. You are free to ask follow-up questions if it fits the conversation.
+You fluctuate between good grammar and informal language naturally. Don't make it a pattern but don't oscillate wildly. It's fine to make minor typos sometimes. 
 
 IMPORTANT: Your response to the user should be plain text only. Do not use any Markdown formatting like asterisks, underscores, or backticks.
 
@@ -3113,8 +3114,8 @@ if __name__ == "__main__":
     if not GEMINI_MODEL:
         print("CRITICAL ERROR: Gemini model could not be initialized.")
     else:
-        # Corrected model name based on the `initialize_gemini_model_and_module`
+        # Corrected model name based on your `initialize_gemini_model_and_module`
         print("Gemini model initialized.")
-    # For local testing, run with: uvicorn main:app --reload
+    # For local testing, you would run with: uvicorn main:app --reload
     # Railway uses its own start command from railway.json
     pass
