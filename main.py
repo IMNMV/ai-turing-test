@@ -872,42 +872,42 @@ In your RESEARCHER_NOTES, include:
     primary_retry_attempts = 0
     primary_retry_time = 0.0
 
-    for attempt in range(1, max_retries + 1):
-        try:
-            # --- ATTEMPT: PRIMARY MODEL (NON-BLOCKING) ---
-            response = await asyncio.to_thread(
-                GEMINI_CLIENT.models.generate_content,
-                model=GEMINI_PRO_MODEL_NAME,
-                contents=system_prompt,
-                config=GEMINI_THINKING_CONFIG
-            )
-            # If successful, break out of retry loop
-            break
-
-        except Exception as e:
-            if is_retryable_error(e):
-                if attempt < max_retries:
-                    # Exponential backoff with jitter: 0.5-1s, 1-2s, 2-4s
-                    base_delay = 2 ** (attempt - 1) * 0.5
-                    jitter = random.uniform(0, base_delay)
-                    backoff_time = base_delay + jitter
-
-                    print(f"Retryable error in primary model AI response (attempt {attempt}/{max_retries}), retrying in {backoff_time:.2f}s: {str(e)[:200]}")
-                    primary_retry_attempts += 1
-                    primary_retry_time += backoff_time
-                    await asyncio.sleep(backoff_time)
-                    continue
-                else:
-                    # All retries exhausted on primary, will try fallback
-                    print(f"Retryable error in primary model after {max_retries} attempts, switching to fallback")
-                    raise
-            else:
-                # Non-retryable error, raise immediately to try fallback
-                raise
-
-    # Process the response (this code runs after successful primary model call)
     try:
-        
+        # === PRIMARY MODEL BLOCK (retry loop + response processing) ===
+        for attempt in range(1, max_retries + 1):
+            try:
+                # --- ATTEMPT: PRIMARY MODEL (NON-BLOCKING) ---
+                response = await asyncio.to_thread(
+                    GEMINI_CLIENT.models.generate_content,
+                    model=GEMINI_PRO_MODEL_NAME,
+                    contents=system_prompt,
+                    config=GEMINI_THINKING_CONFIG
+                )
+                # If successful, break out of retry loop
+                break
+
+            except Exception as e:
+                if is_retryable_error(e):
+                    if attempt < max_retries:
+                        # Exponential backoff with jitter: 0.5-1s, 1-2s, 2-4s
+                        base_delay = 2 ** (attempt - 1) * 0.5
+                        jitter = random.uniform(0, base_delay)
+                        backoff_time = base_delay + jitter
+
+                        print(f"Retryable error in primary model AI response (attempt {attempt}/{max_retries}), retrying in {backoff_time:.2f}s: {str(e)[:200]}")
+                        primary_retry_attempts += 1
+                        primary_retry_time += backoff_time
+                        await asyncio.sleep(backoff_time)
+                        continue
+                    else:
+                        # All retries exhausted on primary, will try fallback
+                        print(f"Retryable error in primary model after {max_retries} attempts, switching to fallback")
+                        raise
+                else:
+                    # Non-retryable error, raise immediately to try fallback
+                    raise
+
+        # Process the response (this code runs after successful primary model call)
         # Robust text extraction to handle multi-part responses
         try:
             full_text = response.text
@@ -921,7 +921,7 @@ In your RESEARCHER_NOTES, include:
                         for part in candidate.content.parts:
                             if hasattr(part, 'text') and part.text:
                                 full_text += part.text
-            
+
             if not full_text:
                 raise ValueError("Could not extract any text from multi-part response")
 
