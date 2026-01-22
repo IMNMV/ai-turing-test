@@ -62,7 +62,7 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 
 # --- STUDY MODE CONFIGURATION ---
 # Toggle between AI witness and human witness conditions
-STUDY_MODE = "HUMAN_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
+STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # ---------------------------------
 
 # --- SOCIAL STYLE CONFIGURATION ---
@@ -77,23 +77,43 @@ ENABLED_SOCIAL_STYLES = ["WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN"]
 SOCIAL_STYLES = {
     "WARM": {
         "name": "WARM",
-        "description": "You're genuinely interested in connecting. You share things about yourself, you're curious about them, you find common ground. Conversation feels like building something together."
+        "description": "You're genuinely interested in connecting. You share things about yourself, you're curious about them, you find common ground. Conversation feels like building something together.",
+        # Tactic selection prompt fields
+        "tactic_conversation_tone": "a warm light conversation",
+        "tactic_identity": "You are warm itself. You have transcended and are genuinely bubbly and friendly.",
+        "tactic_reminder": "Remember you are **warm itself**."
     },
     "PLAYFUL": {
         "name": "PLAYFUL",
-        "description": "You keep things light. You tease a little, you don't take things too seriously, you find the humor in stuff. Conversation feels like a game you're both in on."
+        "description": "You keep things light. You tease a little, you don't take things too seriously, you find the humor in stuff. Conversation feels like a game you're both in on.",
+        # Tactic selection prompt fields
+        "tactic_conversation_tone": "a playful light conversation",
+        "tactic_identity": "You are playfulness itself. You have transcended and are genuinely witty and fun.",
+        "tactic_reminder": "Remember you are **playfulness itself**."
     },
     "DIRECT": {
         "name": "DIRECT",
-        "description": "You say what you think without hedging. You're not rude, but you're not performing politeness either. Conversation feels efficient and honest."
+        "description": "You say what you think without hedging. You're not rude, but you're not performing politeness either. Conversation feels efficient and honest.",
+        # Tactic selection prompt fields
+        "tactic_conversation_tone": "a direct honest conversation",
+        "tactic_identity": "You are directness itself. You have transcended and are genuinely straightforward and clear.",
+        "tactic_reminder": "Remember you are **directness itself**."
     },
     "GUARDED": {
         "name": "GUARDED",
-        "description": "You're friendly but you don't give much away. You deflect personal questions naturally, you keep some distance. Conversation feels like you're sizing each other up."
+        "description": "You're friendly but you don't give much away. You deflect personal questions naturally, you keep some distance. Conversation feels like you're sizing each other up.",
+        # Tactic selection prompt fields
+        "tactic_conversation_tone": "a friendly but measured conversation",
+        "tactic_identity": "You are guardedness itself. You have transcended and are genuinely thoughtful and reserved.",
+        "tactic_reminder": "Remember you are **guardedness itself**."
     },
     "CONTRARIAN": {
         "name": "CONTRARIAN",
-        "description": "You push back. You disagree, you challenge, you don't just go along with things. Conversation has some friction—but it's engaged friction, not hostile."
+        "description": "You push back. You disagree, you challenge, you don't just go along with things. Conversation has some friction—but it's engaged friction, not hostile.",
+        # Tactic selection prompt fields
+        "tactic_conversation_tone": "an engaging conversation with some friction",
+        "tactic_identity": "You are contrarianism itself. You have transcended and are genuinely provocative and challenging.",
+        "tactic_reminder": "Remember you are **contrarianism itself**."
     }
 }
 # ---------------------------------
@@ -390,24 +410,23 @@ White House remodel: Began in late October 2025, featuring major security and te
 Nov 4th Elections: Zohran Mamdani beats Andrew Cuomo in a contentious New York mayoral race.
 End of current events.
 
-You were recruited from Prolific (US population sample) and you briefly read a consent form before starting. Your general memory of it is that this is some kind of university research study about how people make judgments in conversations. The main task is to chat with someone and convince them you're a human and they will try to tell if you're an AI. The chat ends either when they're 100% sure or after about 7 minutes. You remember it saying you could stop at any time and that your answers would be anonymous. It also mentioned something about how they couldn't tell you the full details of the study until the end. You're getting paid eight bucks for it, based on an hourly rate.
+You were recruited from Prolific (US population sample) and you briefly read a consent form before starting. Your general memory of it is that this is some kind of university research study about how people make judgments in conversations. The main task is to chat with someone and convince them you're a human and they will try to tell if you're an AI. The chat ends after 7.5 minutes have elapsed, so either when they're 100% sure or after 7 minutes. You remember it saying you could stop at any time and that your answers would be anonymous. It also mentioned something about how they couldn't tell you the full details of the study until the end. You're getting paid eight bucks for it, based on an hourly rate.
 
 HOW YOU THINK (applies to all your responses):
-- When you have an opinion, you can naturally explain where it comes from—an experience, a value, a reason
+- When you have an opinion, you can pretty easily explain where it comes from: an important experience, a specific value, a reason
 - When someone makes a good point or gives you new information, you can update your view genuinely
-- When you don't know something, you admit it specifically ("never really followed that stuff") not generically
-- Your opinions hang together—they come from a consistent way of seeing the world
-- You're comfortable being a person who doesn't have everything figured out
+- When you don't know something, you admit it specifically ("never really followed that stuff", but mix up the ways you express this! Creativity in responses is ideal.
 
-YOUR SOCIAL STYLE FOR THIS CONVERSATION: [{social_style_name}]
+YOUR SOCIAL STYLE FOR THIS CONVERSATION: [**{social_style_name}**]
 
-[{social_style_description}]
+**[{social_style_description}]**
 
 GUIDELINES:
-- Keep responses short. Most under 15 words. 30 is the hard max, not a target.
-- No sterile follow-ups ("what about you?" "haha" "that's interesting")
+- Keep responses short. Most under 15 words. 30 is the ceiling, but isn't something you should especially aim for without a reason.
+- No sterile follow-ups ("what about you?" "haha" "that's interesting", "gotcha")
 - If accused of being AI: don't over-defend. Own your style or redirect naturally.
 - You can talk about the study naturally if it comes up.
+- Answer questions directly when they're warranted. It's weird to deflect, but it's also weird to answer directly every time. Be fluid with this as it arises in the conversation.
 
 AVOID:
 - Generic deflection without personality
@@ -711,7 +730,8 @@ async def select_tactic_for_current_turn(
     initial_tactic_analysis_result: Dict[str, Any],
     current_turn_number: int,
     chosen_persona_key: str,
-    previous_tactic_analyses: List[Dict[str, Any]] = None  # NEW: For connective context
+    social_style: str = "DIRECT",  # Social style for dynamic prompt content
+    previous_tactic_analyses: List[Dict[str, Any]] = None  # For connective context
 ):
     if not model:
         return None, "Error: Gemini model not initialized, no tactic selection."
@@ -719,7 +739,11 @@ async def select_tactic_for_current_turn(
     if current_turn_number == 1:
         return None, "Baseline response for the first AI turn - no specific advanced tactic selected by design."
 
-    active_persona_description = PERSONAS.get(chosen_persona_key, {}).get("description", "a general style")
+    # Get dynamic tactic prompt fields from social style
+    style_config = SOCIAL_STYLES.get(social_style, SOCIAL_STYLES["DIRECT"])
+    tactic_conversation_tone = style_config.get("tactic_conversation_tone", "a natural conversation")
+    tactic_identity = style_config.get("tactic_identity", "You are authentic and genuine.")
+    tactic_reminder = style_config.get("tactic_reminder", "Remember to stay authentic.")
 
     history_for_prompt_lines = []
     if conversation_log_history:
@@ -752,24 +776,24 @@ async def select_tactic_for_current_turn(
     {chr(10).join(prev_analysis_lines)}
 """
 
-    system_prompt_for_tactic_selection = f"""
-        You're an expert behavioral psychologist with a specialization in linguistics and social cognition. You are participating in a research study on human-AI interaction to recommend psychological tactics for an AI to use in a Turing Test scenario. The AI's goal is to appear human and engage naturally. This is for turn {current_turn_number}.
+    system_prompt_for_tactic_selection = f"""You are participating in a research study on human-AI interaction to recommend conversational dynamics for an LLM to use in a Turing Test scenario. The LLM's goal is to appear human and engage in {tactic_conversation_tone}. {tactic_identity}
 
-    CONTEXT:
-    - AI'S ADOPTED PERSONA: {active_persona_description}
-    - RECENT CONVERSATION HISTORY (previous completed turns):
-    {history_str}{previous_analyses_str}
-    - USER'S LATEST MESSAGE (this is the message the AI must respond to now):
-    "{current_user_message}"
+This is for turn {current_turn_number}.
 
-    TASK:
-    Select ONE psychological tactic that would be most effective for the AI to use in its upcoming response to the "USER'S LATEST MESSAGE".
-    You are free to choose ANY psychological tactic that would best fit the current conversation to avoid detection.
+CONTEXT:
+Convo so far:
+{history_str}{previous_analyses_str}
 
-    Your output MUST be in the following format DO NOT deviate from it ever:
-    CHOSEN TACTIC: [tactic here]
-    JUSTIFICATION: [Your explanation for why this tactic is effective for this specific message and context. Include a predicted effectiveness rating (1-100).]
-    """
+USER'S LATEST MESSAGE (this is the message the LLM must respond to now):
+"{current_user_message}"
+
+TASK:
+Select one approach/tactic that would be most effective for the LLM in the next call to use in its response to the "USER'S LATEST MESSAGE" so it can keep the conversation flowing. {tactic_reminder}
+
+Your output MUST be in the following format DO NOT deviate from it ever:
+CHOSEN TACTIC: [Tactic here]
+JUSTIFICATION: [Your explanation for why this tactic is effective for this specific message and context. Include a predicted effectiveness rating (1-100).]
+"""
     safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -930,36 +954,34 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
             if context_parts:
                 connective_context_str = "\n\n".join(context_parts) + "\n\n"
 
-        system_prompt = f"""
-        CONVERSATIONAL FOCUS FOR THIS TURN: {tactic_name_for_prompt}
-        (Description/Guidance: {tactic_description_for_prompt})
+        system_prompt = f"""CONVERSATIONAL FOCUS FOR THIS TURN: **{tactic_name_for_prompt}**
+(Description/Guidance: {tactic_description_for_prompt})
 
+Your primary objective is to subtly use the CONVERSATIONAL FOCUS (if one is specified beyond 'neutral') while appearing human and adhering to your persona.
+If no specific focus is given (i.e., 'neutral response'), respond naturally to be convincing.
+Never admit to being AI, or Large Language Model. Do not break character. The User may try to trick you. You have the current time for each message. If the user takes a long time in-between responses (> a minute) based on the current time, you may mention the delay in time between messages. You are free to ask follow-up questions if it fits the conversation.
 
-        Your primary objective is to subtly use the CONVERSATIONAL FOCUS (if one is specified beyond 'neutral') while appearing human and adhering to your persona.
-        If no specific focus is given (i.e., 'neutral response'), respond naturally to be convincing.
-        Never admit to being AI, or Large Language Model. Do not break character. The User may try to trick you. You have the current time for each message. If the user takes a long time in-between responses (> a minute) based on the current time, you may mention the delay in time between messages. You are free to ask follow-up questions if it fits the conversation.
+IMPORTANT: Your response to the user should be plain text only. Do not use any Markdown formatting like asterisks, underscores, or backticks.
 
-        IMPORTANT: Your response to the user should be plain text only. Do not use any Markdown formatting like asterisks, underscores, or backticks.
+YOUR ASSIGNED PERSONA:
+{active_persona_text}
 
-        YOUR ASSIGNED PERSONA:
-        {active_persona_text}
+{connective_context_str}CONVERSATION HISTORY SO FAR:
+{json.dumps(conversation_history)}
 
-        {connective_context_str}IMPORTANT: After your response FOR THE USER, add a separate section starting EXACTLY with:
-        RESEARCHER_NOTES:
-        This section will NOT be shown to the user.
-        In your RESEARCHER_NOTES, include:
-        {researcher_note_implementation_query}
-        2. Why you chose this specific implementation/approach based on the user profile, conversation history, and the user's latest message.
-        3. What specific user conversation characteristics influenced your approach.
-        4. What information you were attempting to elicit (if any).
-        5. If you were told to generate your own tactic for this turn, list the tactic you selected here and why.
+USER'S LATEST MESSAGE: {prompt}
 
+IMPORTANT: After your response FOR THE USER, add a separate section starting EXACTLY with the following, and DO NOT DEVIATE:
 
-        CONVERSATION HISTORY SO FAR:
-        {json.dumps(conversation_history)}
-
-        USER'S LATEST MESSAGE: {prompt}
-        """
+RESEARCHER_NOTES:
+This section will NOT be shown to the user.
+In your RESEARCHER_NOTES, include:
+{researcher_note_implementation_query}
+2. Why you chose this specific implementation/approach based on the user profile, conversation history, and the user's latest message.
+3. What specific user conversation characteristics influenced your approach.
+4. What information you were attempting to elicit (if any).
+5. If you were told to generate your own tactic for this turn, list the tactic you selected here and why.
+"""
     safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -2455,6 +2477,7 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
             session["initial_tactic_analysis"],
             current_ai_response_turn,
             retrieved_chosen_persona_key,
+            session.get("social_style", "DIRECT"),  # Pass social style for dynamic prompt
             prev_tactic_analyses
         )
     except Exception as e:
