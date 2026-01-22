@@ -1785,19 +1785,29 @@ async def enter_waiting_room(request: Request, db_session: Session = Depends(get
             session_record.match_status = 'waiting'  # Will be updated when chat starts
             db_session.commit()
 
-        # Log AI mode with social style
-        ai_social_style = session.get('social_style', 'DIRECT')
+        # AI MODE: Assign a random social style for the AI witness to use
+        # This is analogous to how human witnesses get assigned a style
+        ai_social_style = session.get('social_style')
+        if not ai_social_style:
+            ai_social_style = random.choice(ENABLED_SOCIAL_STYLES)
+            session['social_style'] = ai_social_style
+            # Also update database
+            if session_record:
+                session_record.social_style = ai_social_style
+                db_session.commit()
+
         print("=" * 60)
         print(f"🤖 AI MODE SESSION STARTING")
         print(f"   Session: {session_id[:8]}...")
         print(f"   Role: interrogator (vs AI witness)")
-        print(f"   Social Style: {ai_social_style}")
+        print(f"   AI Witness Social Style: {ai_social_style}")
         print("=" * 60)
 
         return JSONResponse(content={
             "ai_partner": True,
             "role": "interrogator",
-            "match_status": "waiting"  # Frontend will simulate finding match
+            "match_status": "waiting",  # Frontend will simulate finding match
+            "ai_social_style": ai_social_style  # Include in response for debugging
         })
 
     # HUMAN_WITNESS mode - just return that they're ready (no role assignment yet)
@@ -2371,7 +2381,7 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
             session["initial_tactic_analysis"],
             current_ai_response_turn,
             retrieved_chosen_persona_key,
-            session.get("social_style", "DIRECT"),  # Pass social style for dynamic prompt
+            session.get("social_style") or "DIRECT",  # Pass social style for dynamic prompt
             prev_tactic_analyses
         )
     except Exception as e:
@@ -2439,7 +2449,7 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
                 session["initial_user_profile_survey"],
                 simple_history_for_your_prompt,
                 retrieved_chosen_persona_key,
-                session.get("social_style", "DIRECT"),
+                session.get("social_style") or "DIRECT",
                 current_tactic_analysis_for_context,
                 prev_researcher_notes
             )
@@ -2483,7 +2493,7 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
                 break
 
     ai_text_length = len(ai_response_text)
-    current_social_style = session.get("social_style", "DIRECT")
+    current_social_style = session.get("social_style") or "DIRECT"  # Handle both missing key and None value
     print(f"--- DEBUG (Turn {current_ai_response_turn}, Session {session_id[:8]}...): Style: {current_social_style} | Tactic: {tactic_key_for_this_turn or 'None'} | AI Resp Len: {ai_text_length}c ---")
 
     time_spent_on_actual_ai_calls = time.time() - actual_ai_processing_start_time
@@ -2642,7 +2652,7 @@ async def log_conversation_start(data: ConversationStartRequest, db_session: Ses
 
     # Comprehensive conversation start logging
     role = session.get('role', 'unknown')
-    social_style = session.get('social_style', 'N/A')
+    social_style = session.get('social_style') or 'N/A'
     is_ai_mode = session.get('matched_session_id') is None
     mode_str = "AI_WITNESS" if is_ai_mode else "HUMAN_WITNESS"
 
