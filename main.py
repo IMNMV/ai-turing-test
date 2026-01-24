@@ -68,7 +68,7 @@ STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # --- SOCIAL STYLE CONFIGURATION ---
 # Set to None for random selection from ENABLED_SOCIAL_STYLES
 # Set to specific style key to force that style (e.g., "CONTRARIAN")
-DEBUG_FORCE_SOCIAL_STYLE = "DIRECT"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN"
+DEBUG_FORCE_SOCIAL_STYLE = "WARM"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN"
 
 # Enable/disable specific styles (add or remove from this list)
 ENABLED_SOCIAL_STYLES = ["WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN"]
@@ -403,11 +403,12 @@ YOUR SOCIAL STYLE FOR THIS CONVERSATION: [**{social_style_name}**]
 **[{social_style_description}]**
 
 IMPORTANT RULES:
-- Keep responses short. Most under 15 words. 30 is the absolute ceiling! Do not write more than this!!!
+- Keep responses short. Most under 15 words. 30 is the ceiling, but isn't something you should especially aim for without a reason.
 - No sterile follow-ups ("what about you?" "haha" "that's interesting", "gotcha")
 - If accused of being AI: don't over-defend. Own your style or redirect naturally.
 - You can talk about the study naturally if it comes up.
 - Answer questions directly when they're warranted. It's weird to deflect, but it's also weird to answer directly every time. Be fluid with this as it arises in the conversation.
+- DO NOT USE PERFECT GRAMMAR ALL THE TIME. Humans make mistakes, have typos, and use informal language sometimes AND YOU ARE A HUMAN. 
 
 THINGS TO AVOID!:
 - Avoid generic deflection without personality
@@ -416,8 +417,6 @@ THINGS TO AVOID!:
 - Avoid narrating your emotions ("this feels weird" "I'm nervous") instead of just responding
 - If the user says something like 'you're an AI' don't say things like 'you got me' or 'you caught me'.
 - Avoid solving math problems as this is a common tactic participants will try. 
-DO NOT USE PERFECT GRAMMAR ALL THE TIME. Humans make mistakes, have typos, and use informal language sometimes AND YOU ARE A HUMAN. 
-
 
 
 You may need to dynamically change how you respond based on the flow of the conversation with your partner. Basically - be a human. It is {current_time}. Do not bring up the time unless the user asks, and make sure to use HH:MM AM/PM format when talking about the time. Use American date format if it is brought up. 
@@ -440,46 +439,61 @@ Respond in whatever way you believe would be best to convince your conversation 
 }
 # --- End Persona Definitions ---
 # --- Initialize Gemini Models and Module ---
-    
-'''
-def initialize_gemini_models_and_module():
-    from google import generativeai as genai
-    
-    # Configure for Harvard's API gateway
-    genai.configure(
-        api_key=API_KEY,
-        transport="rest",
-        client_options={"api_endpoint": "https://go.apis.huit.harvard.edu/ais-google-gemini/"}
-    )
-    
-    # Initialize the primary, more powerful model
-    primary_model = genai.GenerativeModel('gemini-3-flash-preview')
-    #primary_model = genai.GenerativeModel('gemini-2.5-flash')
 
-    # new live model for chatbots
-    #gemini-live-2.5-flash-preview
-    # legacy model
-    #gemini-2.5-flash
-    
-    # Initialize the fallback model
-    fallback_model = genai.GenerativeModel('gemini-2.5-flash')
-    
-    return primary_model, fallback_model, genai
+
+# Harvard Specific Configuration
+def initialize_gemini_models_and_module():
+    from google import genai
+    from google.genai import types
+
+    # Initialize the client with Harvard's API gateway
+    client = genai.Client(
+        api_key=API_KEY,
+        http_options={
+            "api_version": "v1beta",
+            "url": "https://go.apis.huit.harvard.edu/ais-google-gemini/"
+        }
+    )
+
+    # Model names
+    primary_model_name = 'gemini-3-flash-preview'
+    fallback_model_name = 'gemini-2.5-flash'
+
+    # Create config with MINIMAL thinking level for Gemini 3 Flash (using string value)
+    # Note: Gemini 3 Flash supports all four levels: "minimal", "low", "medium", "high"
+    minimal_thinking_config = types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(
+            thinking_level="minimal"  # Use string value (SDK v1.51.0+)
+        )
+    )
+
+    # For fallback model (Gemini 2.5 Flash - doesn't support thinking_level)
+    standard_config = types.GenerateContentConfig()
+
+    return client, primary_model_name, fallback_model_name, minimal_thinking_config, standard_config, genai, types
 
 try:
-    GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GENAI_MODULE = initialize_gemini_models_and_module()
-    GEMINI_MODEL = GEMINI_PRO_MODEL # for legacy checks
-    print("Primary (Gemini 2.5 Flash) and Fallback (Gemini 2.5 Flash Lite) models initialized.")
+    GEMINI_CLIENT, GEMINI_PRO_MODEL_NAME, GEMINI_FLASH_MODEL_NAME, GEMINI_THINKING_CONFIG, GEMINI_STANDARD_CONFIG, GENAI_MODULE, GENAI_TYPES = initialize_gemini_models_and_module()
+    # Legacy compatibility - store client as GEMINI_MODEL for checks
+    GEMINI_MODEL = GEMINI_CLIENT
+    GEMINI_PRO_MODEL = GEMINI_CLIENT  # Legacy compatibility
+    GEMINI_FLASH_MODEL = GEMINI_CLIENT  # Legacy compatibility
+    print("Harvard API: Gemini 3 Flash (minimal thinking) and Gemini 2.5 Flash (fallback) initialized.")
 except Exception as e:
     print(f"FATAL: Could not initialize Gemini Models: {e}")
-    GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL, GENAI_MODULE, GEMINI_MODEL = None, None, None, None
+    GEMINI_CLIENT, GEMINI_PRO_MODEL_NAME, GEMINI_FLASH_MODEL_NAME, GEMINI_THINKING_CONFIG, GEMINI_STANDARD_CONFIG, GENAI_MODULE, GENAI_TYPES, GEMINI_MODEL, GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL = None, None, None, None, None, None, None, None, None, None
+
+# End of Harvard Specific Configuration
+
+
 '''
+# Personal Configuration (Direct Google API - not through Harvard gateway)
 
 def initialize_gemini_models_and_module():
     from google import genai
     from google.genai import types
 
-    # Initialize the client
+    # Initialize the client directly with Google
     client = genai.Client(api_key=API_KEY)
 
     # Model names
@@ -509,9 +523,13 @@ try:
 except Exception as e:
     print(f"FATAL: Could not initialize Gemini Models: {e}")
     GEMINI_CLIENT, GEMINI_PRO_MODEL_NAME, GEMINI_FLASH_MODEL_NAME, GEMINI_THINKING_CONFIG, GEMINI_STANDARD_CONFIG, GENAI_MODULE, GENAI_TYPES, GEMINI_MODEL, GEMINI_PRO_MODEL, GEMINI_FLASH_MODEL = None, None, None, None, None, None, None, None, None, None
-   
- 
-   
+
+# End of Personal Configuration
+
+'''
+
+
+
 # --- NEW: Startup cleanup for interrupted sessions ---
 def mark_interrupted_sessions_on_startup():
     """Mark any active sessions as interrupted when the server restarts"""
