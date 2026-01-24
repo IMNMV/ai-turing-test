@@ -451,7 +451,7 @@ def initialize_gemini_models_and_module():
         api_key=API_KEY,
         http_options={
             "api_version": "v1beta",
-            "url": "https://go.apis.huit.harvard.edu/ais-google-gemini/"
+            "base_url": "https://go.apis.huit.harvard.edu/ais-google-gemini"
         }
     )
 
