@@ -1790,11 +1790,14 @@ async def enter_waiting_room(request: Request, db_session: Session = Depends(get
             session_record.match_status = 'waiting'  # Will be updated when chat starts
             db_session.commit()
 
-        # AI MODE: Assign a random social style for the AI witness to use
-        # This is analogous to how human witnesses get assigned a style
+        # AI MODE: Assign a social style for the AI witness to use
+        # Respect DEBUG_FORCE_SOCIAL_STYLE if set, otherwise randomize
         ai_social_style = session.get('social_style')
         if not ai_social_style:
-            ai_social_style = random.choice(ENABLED_SOCIAL_STYLES)
+            if DEBUG_FORCE_SOCIAL_STYLE and DEBUG_FORCE_SOCIAL_STYLE in ENABLED_SOCIAL_STYLES:
+                ai_social_style = DEBUG_FORCE_SOCIAL_STYLE
+            else:
+                ai_social_style = random.choice(ENABLED_SOCIAL_STYLES)
             session['social_style'] = ai_social_style
             # Also update database
             if session_record:
