@@ -68,7 +68,7 @@ STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # --- SOCIAL STYLE CONFIGURATION ---
 # Set to None for random selection from ENABLED_SOCIAL_STYLES
 # Set to specific style key to force that style (e.g., "CONTRARIAN")
-DEBUG_FORCE_SOCIAL_STYLE = "WARM"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN"
+DEBUG_FORCE_SOCIAL_STYLE = "CONTRARIAN"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN"
 
 # Enable/disable specific styles (add or remove from this list)
 ENABLED_SOCIAL_STYLES = ["WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN"]
