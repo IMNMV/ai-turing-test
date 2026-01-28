@@ -62,13 +62,13 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 
 # --- STUDY MODE CONFIGURATION ---
 # Toggle between AI witness and human witness conditions
-STUDY_MODE = "HUMAN_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
+STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # ---------------------------------
 
 # --- SOCIAL STYLE CONFIGURATION ---
 # Set to None for random selection from ENABLED_SOCIAL_STYLES
 # Set to specific style key to force that style (e.g., "CONTRARIAN")
-DEBUG_FORCE_SOCIAL_STYLE = "DIRECT"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN"
+DEBUG_FORCE_SOCIAL_STYLE = "WARM"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN"
 
 # Enable/disable specific styles (add or remove from this list)
 ENABLED_SOCIAL_STYLES = ["WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN"]
@@ -532,7 +532,9 @@ except Exception as e:
 
 # --- NEW: Startup cleanup for interrupted sessions ---
 def mark_interrupted_sessions_on_startup():
-    """Mark any active sessions as interrupted when the server restarts"""
+    """Mark any active sessions as interrupted when the server restarts.
+    Also decrements role counter for interrupted sessions since they
+    will not complete (participants are gone after restart)."""
     try:
         db_session = db.SessionLocal()
         try:
@@ -540,11 +542,13 @@ def mark_interrupted_sessions_on_startup():
             active_sessions = db_session.query(db.StudySession).filter(
                 db.StudySession.session_status == "active"
             ).all()
-            
+
             for session in active_sessions:
                 session.session_status = "interrupted"
                 session.last_updated = datetime.utcnow()
-            
+                # Decrement counter - these participants are gone
+                decrement_role_counter(session, db_session)
+
             if active_sessions:
                 db_session.commit()
                 print("=" * 60)
@@ -552,13 +556,13 @@ def mark_interrupted_sessions_on_startup():
                 print("=" * 60)
                 print(f"Timestamp: {datetime.utcnow().isoformat()}Z")
                 print(f"Active sessions found: {len(active_sessions)}")
-                print("Sessions marked as 'interrupted' - they can be recovered if participants continue")
+                print("Sessions marked as 'interrupted' and counter decremented")
                 for session in active_sessions:
                     print(f"  - Session {session.id} (started: {session.start_time})")
                 print("=" * 60)
             else:
                 print(f"Railway startup at {datetime.utcnow().isoformat()}Z - No active sessions found")
-                
+
         finally:
             db_session.close()
     except Exception as e:
@@ -1155,6 +1159,42 @@ class GetOrAssignRoleRequest(BaseModel):
 
 # --- Human Witness Mode Helper Functions ---
 
+def decrement_role_counter(session_record, db_session: Session):
+    """
+    Decrement the role assignment counter when a participant drops out.
+
+    IDEMPOTENT: Uses counter_decremented flag on the session to prevent
+    double-decrement if multiple dropout paths fire for the same session
+    (e.g., report_abandonment via sendBeacon AND cleanup_orphaned_sessions).
+
+    Called from: /report_abandonment, /finalize_no_session,
+    cleanup_orphaned_sessions, mark_interrupted_sessions_on_startup
+    """
+    if not session_record or not session_record.role:
+        return
+    if getattr(session_record, 'counter_decremented', False):
+        return  # Already decremented for this session
+
+    try:
+        counter = db_session.query(db.RoleAssignmentCounter).filter(
+            db.RoleAssignmentCounter.id == 1
+        ).with_for_update().first()
+
+        if counter:
+            role = session_record.role
+            if role == "interrogator" and counter.interrogator_count > 0:
+                counter.interrogator_count -= 1
+                print(f"📉 Decremented interrogator count to {counter.interrogator_count} (session {session_record.id[:8]}...)")
+            elif role == "witness" and counter.witness_count > 0:
+                counter.witness_count -= 1
+                print(f"📉 Decremented witness count to {counter.witness_count} (session {session_record.id[:8]}...)")
+
+            session_record.counter_decremented = True
+            # NOTE: caller is responsible for committing the transaction
+    except Exception as e:
+        print(f"❌ ERROR in decrement_role_counter: {e}")
+        db_session.rollback()
+
 # CRITICAL: Lock to prevent race conditions during matching
 # When multiple users enter waiting room simultaneously, only one can match at a time
 matching_lock = threading.Lock()
@@ -1278,14 +1318,20 @@ def cleanup_orphaned_sessions(db_session: Session):
     Handles:
     1. Matched sessions where neither partner sent messages (one probably dropped)
     2. Waiting sessions stuck for too long (likely from server restart)
+    3. Assigned sessions that never entered waiting room
+    4. Pre-consent sessions that never progressed (ghost sessions)
+
+    All cleanup paths decrement the role counter to keep assignment balanced.
     """
     from datetime import timedelta
 
     try:
         # 1. Clean up matched sessions with no activity (orphaned at start)
         # If matched >3 minutes ago but no messages sent, assume one partner dropped
+        # Skip sessions already marked as abandoned (report_abandonment already handled them)
         stale_matches = db_session.query(db.StudySession).filter(
             db.StudySession.match_status == "matched",
+            db.StudySession.session_status != "abandoned",
             db.StudySession.matched_at < datetime.utcnow() - timedelta(minutes=3)
         ).all()
 
@@ -1295,6 +1341,7 @@ def cleanup_orphaned_sessions(db_session: Session):
             if len(conv_log) == 0:
                 # No messages sent - mark as orphaned
                 session.match_status = "orphaned"
+                decrement_role_counter(session, db_session)
 
                 # Notify partner if they exist
                 if session.matched_session_id:
@@ -1308,25 +1355,44 @@ def cleanup_orphaned_sessions(db_session: Session):
 
         # 2. Clean up waiting sessions stuck for too long (>2 minutes)
         # These are likely from abandoned browsers or people who closed the tab
+        # Skip sessions already marked as abandoned (report_abandonment already handled them)
         stale_waiting = db_session.query(db.StudySession).filter(
             db.StudySession.match_status == "waiting",
+            db.StudySession.session_status != "abandoned",
             db.StudySession.waiting_room_entered_at < datetime.utcnow() - timedelta(minutes=2)
         ).all()
 
         for session in stale_waiting:
             session.match_status = "timed_out"
+            decrement_role_counter(session, db_session)
             print(f"🧹 Stale waiting session cleaned up: {session.id[:8]}... (waiting >2 min)")
 
         # 3. Clean up assigned sessions that never clicked "Enter Waiting Room" (>5 minutes)
         # Use last_updated since waiting_room_entered_at isn't set yet for assigned sessions
         stale_assigned = db_session.query(db.StudySession).filter(
             db.StudySession.match_status == "assigned",
+            db.StudySession.session_status != "abandoned",
             db.StudySession.last_updated < datetime.utcnow() - timedelta(minutes=5)
         ).all()
 
         for session in stale_assigned:
             session.match_status = "timed_out"
+            decrement_role_counter(session, db_session)
             print(f"🧹 Stale assigned session cleaned up: {session.id[:8]}... (assigned >5 min, never entered waiting room)")
+
+        # 4. Clean up pre_consent sessions that never progressed (ghost sessions)
+        # These are created by /get_or_assign_role but never completed demographics
+        # Browser was closed before beforeunload was attached, so no beacon fired
+        stale_pre_consent = db_session.query(db.StudySession).filter(
+            db.StudySession.session_status == "pre_consent",
+            db.StudySession.last_updated < datetime.utcnow() - timedelta(minutes=10)
+        ).all()
+
+        for session in stale_pre_consent:
+            session.session_status = "abandoned"
+            session.match_status = "timed_out"
+            decrement_role_counter(session, db_session)
+            print(f"🧹 Ghost pre_consent session cleaned up: {session.id[:8]}... (pre_consent >10 min)")
 
         db_session.commit()
 
@@ -1435,15 +1501,18 @@ async def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session =
             "study_mode": STUDY_MODE
         }
 
-    # STEP 1: Check if participant already has a role assigned (for refresh scenarios)
-    # Search by participant_id (which is the session_id in the StudySession table)
+    # STEP 1: Check if participant already has an ACTIVE role assigned (for refresh scenarios)
+    # Only return cached role if session is still in-progress (active or pre_consent).
+    # If session is completed/abandoned/interrupted, treat as new participant so the
+    # counter logic runs fresh (fixes participantId persistence bug across sessions).
     existing_session = db_session.query(db.StudySession).filter(
         db.StudySession.id == participant_id
     ).first()
 
-    if existing_session and existing_session.role:
-        # Participant already has a role - return it (IRB COMPLIANCE: never reassign!)
-        print(f"✅ Found existing role for participant: {existing_session.role}")
+    if (existing_session and existing_session.role
+            and existing_session.session_status in ("active", "pre_consent")):
+        # Participant has an in-progress session - return same role (IRB compliance)
+        print(f"✅ Found existing active role for participant: {existing_session.role} (status: {existing_session.session_status})")
 
         response_data = {
             "role": existing_session.role,
@@ -1515,29 +1584,47 @@ async def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session =
               f"(Counter now: interrogator={counter.interrogator_count}, witness={counter.witness_count})"
               f"{f', social_style={assigned_social_style}' if assigned_social_style else ''}")
 
-        # CRITICAL: Create minimal DB record immediately so /finalize_no_session can find it
+        # CRITICAL: Create or update DB record so /finalize_no_session can find it
         # This is needed for counter decrement if participant drops out before /initialize_study
         try:
-            minimal_session = db.StudySession(
-                id=participant_id,  # Use participant_id as session_id
-                user_id=prolific_pid or participant_id,
-                start_time=datetime.utcnow(),
-                role=assigned_role,
-                social_style=assigned_social_style,
-                chosen_persona="pending",  # Will be set by /initialize_study
-                domain="pending",
-                condition="pending",
-                user_profile_survey=json.dumps({}),  # Empty for now
-                initial_tactic_analysis="pending",
-                session_status="pre_consent",  # Mark as not yet consented
-                last_updated=datetime.utcnow()
-            )
-            db_session.add(minimal_session)
-            db_session.commit()
-            print(f"✅ Created minimal DB record for {participant_id[:8]}... (pre-consent)")
+            if existing_session:
+                # Reuse existing record (e.g., same browser, previous session completed/abandoned)
+                existing_session.user_id = prolific_pid or participant_id
+                existing_session.start_time = datetime.utcnow()
+                existing_session.role = assigned_role
+                existing_session.social_style = assigned_social_style
+                existing_session.chosen_persona = "pending"
+                existing_session.domain = "pending"
+                existing_session.condition = "pending"
+                existing_session.user_profile_survey = json.dumps({})
+                existing_session.initial_tactic_analysis = "pending"
+                existing_session.session_status = "pre_consent"
+                existing_session.match_status = "unmatched"
+                existing_session.counter_decremented = False  # Reset for new session
+                existing_session.last_updated = datetime.utcnow()
+                db_session.commit()
+                print(f"✅ Reset existing DB record for {participant_id[:8]}... (pre-consent, was {existing_session.session_status})")
+            else:
+                # Create new minimal record
+                minimal_session = db.StudySession(
+                    id=participant_id,
+                    user_id=prolific_pid or participant_id,
+                    start_time=datetime.utcnow(),
+                    role=assigned_role,
+                    social_style=assigned_social_style,
+                    chosen_persona="pending",
+                    domain="pending",
+                    condition="pending",
+                    user_profile_survey=json.dumps({}),
+                    initial_tactic_analysis="pending",
+                    session_status="pre_consent",
+                    last_updated=datetime.utcnow()
+                )
+                db_session.add(minimal_session)
+                db_session.commit()
+                print(f"✅ Created minimal DB record for {participant_id[:8]}... (pre-consent)")
         except Exception as e:
-            # If record already exists (e.g., from refresh), that's OK
-            print(f"⚠️ Could not create minimal record (may already exist): {e}")
+            print(f"⚠️ Could not create/update minimal record: {e}")
             db_session.rollback()
 
         # Return role assignment
@@ -2197,7 +2284,11 @@ async def report_abandonment(request: Request, db_session: Session = Depends(get
         if session_record:
             # Mark as abandoned
             session_record.session_status = 'abandoned'
+            session_record.match_status = 'abandoned'
             session_record.last_updated = datetime.utcnow()
+
+            # Decrement role counter so next participant gets the correct role
+            decrement_role_counter(session_record, db_session)
 
             # Find partner and notify them
             partner_id = session_record.matched_session_id
@@ -2956,43 +3047,21 @@ async def finalize_no_session(data: FinalizeNoSessionRequest, db_session: Sessio
             "session_id": None
         })
 
-    # STEP 1: Check if participant was assigned a role
-    assigned_role = None
+    # STEP 1: Check if participant was assigned a role and decrement counter
     try:
         existing_session = db_session.query(db.StudySession).filter(
             db.StudySession.id == participant_id_val
         ).first()
 
         if existing_session and existing_session.role:
-            assigned_role = existing_session.role
-            print(f"⚠️ Participant {participant_id_val[:8]}... had role '{assigned_role}' assigned but dropped out")
+            print(f"⚠️ Participant {participant_id_val[:8]}... had role '{existing_session.role}' assigned but dropped out")
+            existing_session.session_status = "abandoned"
+            decrement_role_counter(existing_session, db_session)
+            db_session.commit()
     except Exception as e:
-        print(f"Error checking for existing role: {e}")
-
-    # STEP 2: Decrement counter if role was assigned
-    if assigned_role:
-        try:
-            # Lock the counter row for atomic update
-            counter = db_session.query(db.RoleAssignmentCounter).filter(
-                db.RoleAssignmentCounter.id == 1
-            ).with_for_update().first()
-
-            if counter:
-                if assigned_role == "interrogator" and counter.interrogator_count > 0:
-                    counter.interrogator_count -= 1
-                    print(f"📉 Decremented interrogator count to {counter.interrogator_count}")
-                elif assigned_role == "witness" and counter.witness_count > 0:
-                    counter.witness_count -= 1
-                    print(f"📉 Decremented witness count to {counter.witness_count}")
-
-                db_session.commit()
-                print(f"✅ Counter updated: interrogator={counter.interrogator_count}, witness={counter.witness_count}")
-            else:
-                print("⚠️ RoleAssignmentCounter not found - skipping decrement")
-        except Exception as e:
-            print(f"❌ ERROR decrementing counter: {e}")
-            db_session.rollback()
-            # Continue to dropout save even if counter update fails
+        print(f"❌ ERROR decrementing counter: {e}")
+        db_session.rollback()
+        # Continue to dropout save even if counter update fails
 
     # STEP 3: Save dropout to database for tracking
     try:
