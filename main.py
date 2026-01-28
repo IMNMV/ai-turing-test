@@ -62,7 +62,7 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 
 # --- STUDY MODE CONFIGURATION ---
 # Toggle between AI witness and human witness conditions
-STUDY_MODE = "HUMAN_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
+STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # ---------------------------------
 
 # --- SOCIAL STYLE CONFIGURATION ---
