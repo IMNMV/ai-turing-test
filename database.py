@@ -71,6 +71,7 @@ class StudySession(Base):
     final_confidence_percent = Column(Integer, nullable=True)  # 0-100 confidence in final choice
     has_excessive_delays = Column(Boolean, default=False)  # Flag if session had network delays >40s
     counter_decremented = Column(Boolean, default=False)  # Prevent double-decrement of role counter on dropout
+    requeue_count = Column(Integer, default=0)  # How many times re-queued after partner dropped (for analytics)
 
     # NEW: Timeout tracking - which screen/phase caused timeout (null if completed normally)
     # Values: consent, instructions, demographics, role_assignment, waiting_room,
