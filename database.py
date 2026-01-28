@@ -72,6 +72,11 @@ class StudySession(Base):
     has_excessive_delays = Column(Boolean, default=False)  # Flag if session had network delays >40s
     counter_decremented = Column(Boolean, default=False)  # Prevent double-decrement of role counter on dropout
 
+    # NEW: Timeout tracking - which screen/phase caused timeout (null if completed normally)
+    # Values: consent, instructions, demographics, role_assignment, waiting_room,
+    #         partner_timeout, witness_final, feedback, debrief, backend_cleanup
+    timeout_screen = Column(String, nullable=True)
+
     # NEW: Human witness mode - Role and matching fields
     role = Column(String, nullable=True)  # "interrogator" or "witness"
     matched_session_id = Column(String, nullable=True, index=True)  # Partner's session_id
