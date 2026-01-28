@@ -70,6 +70,7 @@ class StudySession(Base):
     final_binary_choice = Column(String, nullable=True)  # 'human' or 'ai' - final decision at time expiry
     final_confidence_percent = Column(Integer, nullable=True)  # 0-100 confidence in final choice
     has_excessive_delays = Column(Boolean, default=False)  # Flag if session had network delays >40s
+    counter_decremented = Column(Boolean, default=False)  # Prevent double-decrement of role counter on dropout
 
     # NEW: Human witness mode - Role and matching fields
     role = Column(String, nullable=True)  # "interrogator" or "witness"
