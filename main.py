@@ -65,6 +65,12 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # ---------------------------------
 
+# --- RE-QUEUE CONFIGURATION ---
+# Maximum total time a participant can spend waiting (across all match attempts)
+# After this time, they're redirected to Prolific timeout (not re-queued again)
+MAX_TOTAL_WAITING_SECONDS = 240  # 4 minutes total cap
+# ---------------------------------
+
 # --- SOCIAL STYLE CONFIGURATION ---
 # Set to None for random selection from ENABLED_SOCIAL_STYLES
 # Set to specific style key to force that style (e.g., "CONTRARIAN")
@@ -1195,6 +1201,70 @@ def decrement_role_counter(session_record, db_session: Session):
         print(f"❌ ERROR in decrement_role_counter: {e}")
         db_session.rollback()
 
+def requeue_or_timeout_session(session_record, db_session: Session, reason: str = "partner_dropped") -> str:
+    """
+    Re-queue a session whose partner dropped, OR timeout if they've waited too long.
+
+    Logic:
+    - If total wait time < MAX_TOTAL_WAITING_SECONDS (4 min): re-queue for new match
+    - If total wait time >= MAX_TOTAL_WAITING_SECONDS: timeout and redirect to Prolific
+
+    Returns: "requeued" or "timed_out"
+    """
+    if not session_record or not session_record.waiting_room_entered_at:
+        return "timed_out"  # Can't calculate wait time, just timeout
+
+    # Calculate total time since they first entered waiting room
+    total_wait_seconds = (datetime.utcnow() - session_record.waiting_room_entered_at).total_seconds()
+
+    if total_wait_seconds < MAX_TOTAL_WAITING_SECONDS:
+        # RE-QUEUE: Reset to waiting status for new match
+        # Keep original waiting_room_entered_at for FIFO priority (they've been waiting longest)
+        old_partner = session_record.matched_session_id
+
+        session_record.match_status = "waiting"
+        session_record.matched_session_id = None
+        session_record.matched_at = None
+        session_record.proceed_to_chat_at = None
+        session_record.first_message_sender = None
+        session_record.requeue_count = (session_record.requeue_count or 0) + 1
+        session_record.last_updated = datetime.utcnow()
+
+        # Update in-memory session if exists
+        if session_record.id in sessions:
+            sessions[session_record.id]['match_status'] = 'waiting'
+            sessions[session_record.id]['matched_session_id'] = None
+            sessions[session_record.id]['proceed_to_chat_at'] = None
+            sessions[session_record.id]['first_message_sender'] = None
+
+        print(f"🔄 RE-QUEUED: {session_record.id[:8]}... after {reason} "
+              f"(waited {total_wait_seconds:.0f}s, requeue #{session_record.requeue_count}, "
+              f"old partner: {old_partner[:8] if old_partner else 'None'}...)")
+
+        # Try to immediately find a new match
+        match_result = attempt_match(db_session)
+        if match_result:
+            print(f"✅ IMMEDIATE RE-MATCH: {session_record.id[:8]}... found new partner!")
+
+        return "requeued"
+    else:
+        # TIMEOUT: They've waited too long (>=4 min total), redirect to Prolific
+        session_record.match_status = "timed_out"
+        session_record.session_status = "abandoned"
+        session_record.timeout_screen = f"requeue_timeout_{reason}"
+        session_record.last_updated = datetime.utcnow()
+        decrement_role_counter(session_record, db_session)
+
+        # Update in-memory session if exists
+        if session_record.id in sessions:
+            sessions[session_record.id]['match_status'] = 'timed_out'
+
+        print(f"⏱️ REQUEUE TIMEOUT: {session_record.id[:8]}... exceeded {MAX_TOTAL_WAITING_SECONDS}s total wait "
+              f"(actual: {total_wait_seconds:.0f}s), redirecting to Prolific")
+
+        return "timed_out"
+
+
 # CRITICAL: Lock to prevent race conditions during matching
 # When multiple users enter waiting room simultaneously, only one can match at a time
 matching_lock = threading.Lock()
@@ -1326,8 +1396,9 @@ def cleanup_orphaned_sessions(db_session: Session):
     from datetime import timedelta
 
     try:
-        # 1. Clean up matched sessions with no activity (orphaned at start)
-        # If matched >2 minutes ago but no messages sent, assume one partner dropped
+        # 1. Re-queue matched sessions with no activity (partner probably dropped)
+        # If matched >2 minutes ago but no messages sent, RE-QUEUE them for a new partner
+        # This saves participants whose partner dropped during waiting room
         # Skip sessions already marked as abandoned (report_abandonment already handled them)
         stale_matches = db_session.query(db.StudySession).filter(
             db.StudySession.match_status == "matched",
@@ -1335,24 +1406,33 @@ def cleanup_orphaned_sessions(db_session: Session):
             db.StudySession.matched_at < datetime.utcnow() - timedelta(minutes=2)
         ).all()
 
+        # Track which sessions we've processed to avoid double-processing pairs
+        processed_session_ids = set()
+
         for session in stale_matches:
+            if session.id in processed_session_ids:
+                continue  # Already handled as part of a pair
+
             # Check if any messages were sent
             conv_log = json.loads(session.conversation_log) if session.conversation_log else []
             if len(conv_log) == 0:
-                # No messages sent - mark as orphaned
-                session.match_status = "orphaned"
-                session.timeout_screen = "backend_cleanup_matched_no_messages"
-                decrement_role_counter(session, db_session)
+                # No messages sent - RE-QUEUE this session (don't orphan)
+                # This gives them a chance to match with a new partner
+                result = requeue_or_timeout_session(session, db_session, "stale_match_no_messages")
+                processed_session_ids.add(session.id)
 
-                # Notify partner if they exist
+                # Also re-queue the partner if they exist and are still matched
                 if session.matched_session_id:
                     partner = db_session.query(db.StudySession).filter(
                         db.StudySession.id == session.matched_session_id
                     ).first()
-                    if partner and partner.match_status == "matched":
-                        partner.match_status = "partner_dropped"
+                    if partner and partner.match_status == "matched" and partner.id not in processed_session_ids:
+                        partner_conv = json.loads(partner.conversation_log) if partner.conversation_log else []
+                        if len(partner_conv) == 0:
+                            requeue_or_timeout_session(partner, db_session, "stale_match_no_messages")
+                            processed_session_ids.add(partner.id)
 
-                print(f"Orphaned session cleaned up: {session.id[:8]}... (matched but no messages)")
+                print(f"🔄 Stale match processed: {session.id[:8]}... -> {result}")
 
         # 2. Clean up waiting sessions stuck for too long (>2 minutes)
         # These are likely from abandoned browsers or people who closed the tab
@@ -2066,10 +2146,15 @@ async def check_match_status(session_id: str, db_session: Session = Depends(get_
             "proceed_to_chat_at": proceed_at_timestamp  # Unix timestamp for frontend
         })
     else:
+        # Check if this session was re-queued (for frontend UX messaging)
+        requeue_count = db_record.requeue_count if db_record else 0
+
         return JSONResponse(content={
             "matched": False,
             "timed_out": False,
-            "time_waiting_seconds": time_waiting_seconds
+            "time_waiting_seconds": time_waiting_seconds,
+            "requeue_count": requeue_count or 0,  # 0 = first match attempt, >0 = re-queued after partner dropped
+            "was_requeued": (requeue_count or 0) > 0  # Convenience flag for frontend
         })
 
 
@@ -2450,42 +2535,88 @@ async def report_abandonment(request: Request, db_session: Session = Depends(get
 @app.post("/report_partner_dropped")
 async def report_partner_dropped(request: Request, db_session: Session = Depends(get_db)):
     """
-    Report that partner has disconnected.
-    Marks both sessions as partner_dropped.
+    Report that partner has disconnected during waiting room phase.
+
+    NEW BEHAVIOR: Re-queues the reporting session for a new match instead of
+    abandoning them. This saves participants whose partner dropped.
+
+    Returns:
+    - requeued: true if session was re-queued for new match
+    - timed_out: true if session exceeded 4-min total wait cap
     """
     data = await request.json()
     session_id = data.get('session_id')
 
+    # Try to recover session if not in memory
     if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
+        session_record = db_session.query(db.StudySession).filter(
+            db.StudySession.id == session_id
+        ).first()
+        if session_record:
+            recovered = recover_session_from_database(session_id, db_session)
+            if recovered:
+                sessions[session_id] = recovered
+        else:
+            raise HTTPException(status_code=404, detail="Session not found")
 
-    session = sessions[session_id]
+    session = sessions.get(session_id, {})
     partner_id = session.get('matched_session_id')
 
-    # Mark this session as partner_dropped
-    session['match_status'] = 'partner_dropped'
+    # Get the database record for this session
     session_record = db_session.query(db.StudySession).filter(
         db.StudySession.id == session_id
     ).first()
-    if session_record:
-        session_record.match_status = 'partner_dropped'
 
-    # Mark partner's session as partner_dropped
+    if not session_record:
+        raise HTTPException(status_code=404, detail="Session record not found")
+
+    # Check if any messages were exchanged
+    conv_log = json.loads(session_record.conversation_log) if session_record.conversation_log else []
+
+    if len(conv_log) > 0:
+        # Messages were exchanged - this is a mid-conversation dropout
+        # Don't re-queue, let the frontend handle final choice flow
+        session_record.match_status = 'partner_dropped'
+        if session_id in sessions:
+            sessions[session_id]['match_status'] = 'partner_dropped'
+        db_session.commit()
+
+        print(f"❌ Partner dropped MID-CONVERSATION: {session_id[:8]}... ({len(conv_log)} messages exchanged)")
+        return JSONResponse(content={
+            "message": "Partner dropout logged (mid-conversation)",
+            "requeued": False,
+            "timed_out": False,
+            "had_messages": True
+        })
+
+    # No messages exchanged - this is a waiting room dropout
+    # RE-QUEUE this session for a new partner
+    result = requeue_or_timeout_session(session_record, db_session, "partner_dropped_waiting_room")
+
+    # Mark the partner's session as orphaned (they dropped)
     if partner_id:
         if partner_id in sessions:
-            sessions[partner_id]['match_status'] = 'partner_dropped'
+            sessions[partner_id]['match_status'] = 'orphaned'
 
         partner_record = db_session.query(db.StudySession).filter(
             db.StudySession.id == partner_id
         ).first()
         if partner_record:
-            partner_record.match_status = 'partner_dropped'
+            partner_record.match_status = 'orphaned'
+            partner_record.session_status = 'abandoned'
+            partner_record.timeout_screen = 'partner_reported_dropout'
+            decrement_role_counter(partner_record, db_session)
 
     db_session.commit()
 
-    print(f"Partner dropout logged: {session_id[:8]}... <-> {partner_id[:8] if partner_id else 'None'}...")
+    print(f"🔄 Partner dropout in waiting room: {session_id[:8]}... -> {result}")
 
-    return JSONResponse(content={"message": "Partner dropout logged"})
+    return JSONResponse(content={
+        "message": f"Partner dropout handled: {result}",
+        "requeued": result == "requeued",
+        "timed_out": result == "timed_out",
+        "had_messages": False
+    })
 
 
 @app.post("/send_message")
