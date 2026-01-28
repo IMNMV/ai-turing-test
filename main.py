@@ -62,7 +62,7 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 
 # --- STUDY MODE CONFIGURATION ---
 # Toggle between AI witness and human witness conditions
-STUDY_MODE = "HUMAN_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
+STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # ---------------------------------
 
 # --- SOCIAL STYLE CONFIGURATION ---
@@ -1327,12 +1327,12 @@ def cleanup_orphaned_sessions(db_session: Session):
 
     try:
         # 1. Clean up matched sessions with no activity (orphaned at start)
-        # If matched >3 minutes ago but no messages sent, assume one partner dropped
+        # If matched >2 minutes ago but no messages sent, assume one partner dropped
         # Skip sessions already marked as abandoned (report_abandonment already handled them)
         stale_matches = db_session.query(db.StudySession).filter(
             db.StudySession.match_status == "matched",
             db.StudySession.session_status != "abandoned",
-            db.StudySession.matched_at < datetime.utcnow() - timedelta(minutes=3)
+            db.StudySession.matched_at < datetime.utcnow() - timedelta(minutes=2)
         ).all()
 
         for session in stale_matches:
@@ -1341,6 +1341,7 @@ def cleanup_orphaned_sessions(db_session: Session):
             if len(conv_log) == 0:
                 # No messages sent - mark as orphaned
                 session.match_status = "orphaned"
+                session.timeout_screen = "backend_cleanup_matched_no_messages"
                 decrement_role_counter(session, db_session)
 
                 # Notify partner if they exist
@@ -1364,35 +1365,39 @@ def cleanup_orphaned_sessions(db_session: Session):
 
         for session in stale_waiting:
             session.match_status = "timed_out"
+            session.timeout_screen = "backend_cleanup_waiting_room"
             decrement_role_counter(session, db_session)
             print(f"🧹 Stale waiting session cleaned up: {session.id[:8]}... (waiting >2 min)")
 
-        # 3. Clean up assigned sessions that never clicked "Enter Waiting Room" (>5 minutes)
+        # 3. Clean up assigned sessions that never clicked "Enter Waiting Room" (>2 minutes)
         # Use last_updated since waiting_room_entered_at isn't set yet for assigned sessions
         stale_assigned = db_session.query(db.StudySession).filter(
             db.StudySession.match_status == "assigned",
             db.StudySession.session_status != "abandoned",
-            db.StudySession.last_updated < datetime.utcnow() - timedelta(minutes=5)
+            db.StudySession.last_updated < datetime.utcnow() - timedelta(minutes=2)
         ).all()
 
         for session in stale_assigned:
             session.match_status = "timed_out"
+            session.timeout_screen = "backend_cleanup_post_demo_instructions"
             decrement_role_counter(session, db_session)
-            print(f"🧹 Stale assigned session cleaned up: {session.id[:8]}... (assigned >5 min, never entered waiting room)")
+            print(f"🧹 Stale assigned session cleaned up: {session.id[:8]}... (assigned >2 min, never entered waiting room)")
 
         # 4. Clean up pre_consent sessions that never progressed (ghost sessions)
         # These are created by /get_or_assign_role but never completed demographics
         # Browser was closed before beforeunload was attached, so no beacon fired
+        # Timeout matches consent screen (3 minutes)
         stale_pre_consent = db_session.query(db.StudySession).filter(
             db.StudySession.session_status == "pre_consent",
-            db.StudySession.last_updated < datetime.utcnow() - timedelta(minutes=10)
+            db.StudySession.last_updated < datetime.utcnow() - timedelta(minutes=3)
         ).all()
 
         for session in stale_pre_consent:
             session.session_status = "abandoned"
             session.match_status = "timed_out"
+            session.timeout_screen = "backend_cleanup_consent"
             decrement_role_counter(session, db_session)
-            print(f"🧹 Ghost pre_consent session cleaned up: {session.id[:8]}... (pre_consent >10 min)")
+            print(f"🧹 Ghost pre_consent session cleaned up: {session.id[:8]}... (pre_consent >3 min)")
 
         db_session.commit()
 
@@ -1400,14 +1405,14 @@ def cleanup_orphaned_sessions(db_session: Session):
         print(f"Error in cleanup_orphaned_sessions: {str(e)}")
         db_session.rollback()
 
-# Schedule cleanup job to run every 5 minutes
+# Schedule cleanup job to run every 1 minute (frequent cleanup for responsive user experience)
 import threading
 import time as time_module
 
 def run_periodic_cleanup():
-    """Background thread that runs cleanup every 5 minutes"""
+    """Background thread that runs cleanup every 1 minute (was 5, reduced for faster response)"""
     while True:
-        time_module.sleep(300)  # 5 minutes
+        time_module.sleep(60)  # 1 minute (faster cleanup to match 5-min user timeout rule)
         try:
             db_session = db.SessionLocal()
             cleanup_orphaned_sessions(db_session)
@@ -2025,6 +2030,19 @@ async def check_match_status(session_id: str, db_session: Session = Depends(get_
 
     match_status = session.get('match_status', 'unmatched')
 
+    # FIX BUG 1: Also check database for cleanup-marked status (in-memory may be stale)
+    # The cleanup job marks sessions as timed_out/orphaned in the database
+    db_record = db_session.query(db.StudySession).filter(
+        db.StudySession.id == session_id
+    ).first()
+    if db_record and db_record.match_status in ('timed_out', 'orphaned'):
+        print(f"⚠️ SESSION CLEANED UP: {session_id[:8]}... was marked {db_record.match_status} by cleanup job")
+        return JSONResponse(content={
+            "matched": False,
+            "timed_out": True,
+            "cleanup_reason": db_record.match_status
+        })
+
     # Calculate time waiting
     time_waiting_seconds = 0
     if session.get('waiting_room_entered_at'):
@@ -2050,7 +2068,107 @@ async def check_match_status(session_id: str, db_session: Session = Depends(get_
     else:
         return JSONResponse(content={
             "matched": False,
+            "timed_out": False,
             "time_waiting_seconds": time_waiting_seconds
+        })
+
+
+@app.get("/study_status_ping")
+async def study_status_ping(db_session: Session = Depends(get_db)):
+    """
+    Status monitoring endpoint - returns current state of all active participants.
+    Called periodically by frontend to log status to Railway for visual monitoring.
+    Helps researcher see if interrogator/witness counts are balanced and catch issues early.
+    """
+    try:
+        # Count active sessions by role and status
+        # Only count sessions that are actually active (not completed/abandoned)
+        active_sessions = db_session.query(db.StudySession).filter(
+            db.StudySession.session_status.in_(["active", "pre_consent"]),
+            db.StudySession.role.isnot(None)
+        ).all()
+
+        # Categorize by role and match_status
+        stats = {
+            "interrogators": {"waiting": 0, "matched": 0, "in_conversation": 0, "total": 0},
+            "witnesses": {"waiting": 0, "matched": 0, "in_conversation": 0, "total": 0},
+            "unassigned": 0
+        }
+
+        for session in active_sessions:
+            role = session.role
+            match_status = session.match_status or "unassigned"
+
+            if role == "interrogator":
+                stats["interrogators"]["total"] += 1
+                if match_status == "waiting":
+                    stats["interrogators"]["waiting"] += 1
+                elif match_status == "matched":
+                    # Check if they have messages (in conversation vs just matched)
+                    conv_log = json.loads(session.conversation_log) if session.conversation_log else []
+                    if len(conv_log) > 0:
+                        stats["interrogators"]["in_conversation"] += 1
+                    else:
+                        stats["interrogators"]["matched"] += 1
+            elif role == "witness":
+                stats["witnesses"]["total"] += 1
+                if match_status == "waiting":
+                    stats["witnesses"]["waiting"] += 1
+                elif match_status == "matched":
+                    conv_log = json.loads(session.conversation_log) if session.conversation_log else []
+                    if len(conv_log) > 0:
+                        stats["witnesses"]["in_conversation"] += 1
+                    else:
+                        stats["witnesses"]["matched"] += 1
+            else:
+                stats["unassigned"] += 1
+
+        # Get role counter for comparison
+        counter = db_session.query(db.RoleAssignmentCounter).filter(
+            db.RoleAssignmentCounter.id == 1
+        ).first()
+
+        counter_stats = {
+            "interrogator_count": counter.interrogator_count if counter else 0,
+            "witness_count": counter.witness_count if counter else 0
+        }
+
+        # Calculate mismatch
+        waiting_mismatch = stats["interrogators"]["waiting"] - stats["witnesses"]["waiting"]
+        total_mismatch = stats["interrogators"]["total"] - stats["witnesses"]["total"]
+
+        # Log to Railway with clear visual formatting
+        print(f"""
+╔══════════════════════════════════════════════════════════════╗
+║                    📊 STUDY STATUS PING                       ║
+╠══════════════════════════════════════════════════════════════╣
+║  INTERROGATORS: {stats['interrogators']['total']:3d} total | {stats['interrogators']['waiting']:3d} waiting | {stats['interrogators']['matched']:3d} matched | {stats['interrogators']['in_conversation']:3d} chatting
+║  WITNESSES:     {stats['witnesses']['total']:3d} total | {stats['witnesses']['waiting']:3d} waiting | {stats['witnesses']['matched']:3d} matched | {stats['witnesses']['in_conversation']:3d} chatting
+║  ─────────────────────────────────────────────────────────────
+║  WAITING MISMATCH: {waiting_mismatch:+d} (positive = more interrogators waiting)
+║  TOTAL MISMATCH:   {total_mismatch:+d}
+║  ─────────────────────────────────────────────────────────────
+║  ROLE COUNTER: I={counter_stats['interrogator_count']} W={counter_stats['witness_count']}
+║  STUDY MODE: {STUDY_MODE}
+╚══════════════════════════════════════════════════════════════╝
+""")
+
+        return JSONResponse(content={
+            "status": "ok",
+            "study_mode": STUDY_MODE,
+            "interrogators": stats["interrogators"],
+            "witnesses": stats["witnesses"],
+            "waiting_mismatch": waiting_mismatch,
+            "total_mismatch": total_mismatch,
+            "role_counter": counter_stats,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+    except Exception as e:
+        print(f"❌ STUDY STATUS PING ERROR: {str(e)}")
+        return JSONResponse(content={
+            "status": "error",
+            "error": str(e)
         })
 
 
@@ -3004,6 +3122,48 @@ async def log_ui_event(evt: UIEventRequest):
     
     # If neither, still return OK but note that it wasn't saved
     return {"message": "Event received but not saved (no participant_id or session_id)."}
+
+class TimeoutRecordRequest(BaseModel):
+    participant_id: str
+    session_id: Optional[str] = None
+    timeout_screen: str  # consent, instructions, demographics, role_assignment, waiting_room, partner_timeout, witness_final, feedback, debrief, backend_cleanup
+
+@app.post("/record_timeout")
+async def record_timeout(data: TimeoutRecordRequest, db_session: Session = Depends(get_db)):
+    """
+    Record which screen/phase caused a timeout for analytics.
+    Called by frontend before redirecting to Prolific.
+    """
+    print(f"⏱️ TIMEOUT RECORDED: participant={data.participant_id[:8]}..., screen={data.timeout_screen}")
+
+    # Try to find session by session_id first, then by participant_id
+    session_record = None
+    if data.session_id:
+        session_record = db_session.query(db.StudySession).filter(
+            db.StudySession.id == data.session_id
+        ).first()
+
+    if not session_record and data.participant_id:
+        # Look up by participant_id (which is stored as session id for pre_consent sessions)
+        session_record = db_session.query(db.StudySession).filter(
+            db.StudySession.id == data.participant_id
+        ).first()
+
+    if session_record:
+        session_record.timeout_screen = data.timeout_screen
+        session_record.session_status = "timeout"
+        session_record.last_updated = datetime.utcnow()
+
+        # Decrement role counter since they didn't complete
+        decrement_role_counter(session_record, db_session)
+
+        db_session.commit()
+        print(f"✅ Timeout recorded in database for session {session_record.id[:8]}...")
+        return {"success": True, "message": "Timeout recorded"}
+    else:
+        print(f"⚠️ Could not find session to record timeout for participant {data.participant_id[:8]}...")
+        return {"success": False, "message": "Session not found, timeout logged but not saved to DB"}
+
 
 @app.post("/submit_final_comment")
 async def submit_final_comment(data: FinalCommentRequest, db_session: Session = Depends(get_db)):
