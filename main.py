@@ -62,7 +62,7 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 
 # --- STUDY MODE CONFIGURATION ---
 # Toggle between AI witness and human witness conditions
-STUDY_MODE = "HUMAN_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
+STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # ---------------------------------
 
 # --- RE-QUEUE CONFIGURATION ---
@@ -1306,15 +1306,19 @@ def attempt_match(db_session: Session) -> Optional[Dict[str, str]]:
     # Only one matching operation can happen at a time
     with matching_lock:
         # Query oldest waiting interrogator (FIFO - first in, first matched)
+        # DEFENSIVE: Also exclude abandoned sessions to prevent ghost matches
         interrogator = db_session.query(db.StudySession).filter(
             db.StudySession.role == "interrogator",
-            db.StudySession.match_status == "waiting"
+            db.StudySession.match_status == "waiting",
+            db.StudySession.session_status != "abandoned"  # Exclude ghost sessions
         ).order_by(db.StudySession.waiting_room_entered_at.asc()).first()
 
         # Query oldest waiting witness
+        # DEFENSIVE: Also exclude abandoned sessions to prevent ghost matches
         witness = db_session.query(db.StudySession).filter(
             db.StudySession.role == "witness",
-            db.StudySession.match_status == "waiting"
+            db.StudySession.match_status == "waiting",
+            db.StudySession.session_status != "abandoned"  # Exclude ghost sessions
         ).order_by(db.StudySession.waiting_room_entered_at.asc()).first()
 
         if not interrogator or not witness:
@@ -3347,6 +3351,7 @@ async def finalize_no_session(data: FinalizeNoSessionRequest, db_session: Sessio
         if existing_session and existing_session.role:
             print(f"⚠️ Participant {participant_id_val[:8]}... had role '{existing_session.role}' assigned but dropped out")
             existing_session.session_status = "abandoned"
+            existing_session.match_status = "abandoned"  # CRITICAL: Also update match_status to prevent ghost matches
             decrement_role_counter(existing_session, db_session)
             db_session.commit()
     except Exception as e:
