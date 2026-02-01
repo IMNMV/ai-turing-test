@@ -1551,58 +1551,6 @@ async def health_check(db_session: Session = Depends(get_db)):
             "error": str(e)
         }
 
-# --- Admin Endpoint for Counter Reset (dev testing) ---
-@app.post("/admin/reset_counter")
-async def reset_role_counter(db_session: Session = Depends(get_db)):
-    """
-    Reset the role assignment counter to match actual active sessions.
-    USE WITH CAUTION - only for dev testing or fixing drift after Railway restarts.
-
-    To use: POST /admin/reset_counter?secret=turing2026
-    """
-    from fastapi import Query
-    # No auth for now, but could add a simple secret param
-
-    try:
-        # Count actual active/pre_consent sessions by role
-        actual_interrogators = db_session.query(db.StudySession).filter(
-            db.StudySession.role == "interrogator",
-            db.StudySession.session_status.in_(["active", "pre_consent"])
-        ).count()
-
-        actual_witnesses = db_session.query(db.StudySession).filter(
-            db.StudySession.role == "witness",
-            db.StudySession.session_status.in_(["active", "pre_consent"])
-        ).count()
-
-        # Get current counter
-        counter = db_session.query(db.RoleAssignmentCounter).filter(
-            db.RoleAssignmentCounter.id == 1
-        ).with_for_update().first()
-
-        if not counter:
-            counter = db.RoleAssignmentCounter(id=1, interrogator_count=0, witness_count=0)
-            db_session.add(counter)
-
-        old_i, old_w = counter.interrogator_count, counter.witness_count
-        counter.interrogator_count = actual_interrogators
-        counter.witness_count = actual_witnesses
-
-        db_session.commit()
-
-        print(f"🔧 COUNTER RESET: I={old_i}→{actual_interrogators}, W={old_w}→{actual_witnesses}")
-
-        return {
-            "status": "reset",
-            "old_counter": {"interrogator": old_i, "witness": old_w},
-            "new_counter": {"interrogator": actual_interrogators, "witness": actual_witnesses},
-            "message": "Counter synced to actual active sessions"
-        }
-    except Exception as e:
-        db_session.rollback()
-        return {"status": "error", "message": str(e)}
-
-
 # --- API Endpoints ---
 @app.get("/", response_class=HTMLResponse)
 async def get_home(request: Request):
