@@ -62,7 +62,7 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 
 # --- STUDY MODE CONFIGURATION ---
 # Toggle between AI witness and human witness conditions
-STUDY_MODE = "HUMAN_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
+STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # ---------------------------------
 
 # --- RE-QUEUE CONFIGURATION ---
@@ -534,6 +534,43 @@ except Exception as e:
 
 '''
 
+
+# --- Helper function for counter decrement (must be defined before startup cleanup) ---
+def decrement_role_counter(session_record, db_session: Session):
+    """
+    Decrement the role assignment counter when a participant drops out.
+
+    IDEMPOTENT: Uses counter_decremented flag on the session to prevent
+    double-decrement if multiple dropout paths fire for the same session
+    (e.g., report_abandonment via sendBeacon AND cleanup_orphaned_sessions).
+
+    Called from: /report_abandonment, /finalize_no_session,
+    cleanup_orphaned_sessions, mark_interrupted_sessions_on_startup
+    """
+    if not session_record or not session_record.role:
+        return
+    if getattr(session_record, 'counter_decremented', False):
+        return  # Already decremented for this session
+
+    try:
+        counter = db_session.query(db.RoleAssignmentCounter).filter(
+            db.RoleAssignmentCounter.id == 1
+        ).with_for_update().first()
+
+        if counter:
+            role = session_record.role
+            if role == "interrogator" and counter.interrogator_count > 0:
+                counter.interrogator_count -= 1
+                print(f"📉 Decremented interrogator count to {counter.interrogator_count} (session {session_record.id[:8]}...)")
+            elif role == "witness" and counter.witness_count > 0:
+                counter.witness_count -= 1
+                print(f"📉 Decremented witness count to {counter.witness_count} (session {session_record.id[:8]}...)")
+
+            session_record.counter_decremented = True
+            # NOTE: caller is responsible for committing the transaction
+    except Exception as e:
+        print(f"❌ ERROR in decrement_role_counter: {e}")
+        db_session.rollback()
 
 
 # --- NEW: Startup cleanup for interrupted sessions ---
@@ -1164,42 +1201,7 @@ class GetOrAssignRoleRequest(BaseModel):
 # --- End Pydantic Models ---
 
 # --- Human Witness Mode Helper Functions ---
-
-def decrement_role_counter(session_record, db_session: Session):
-    """
-    Decrement the role assignment counter when a participant drops out.
-
-    IDEMPOTENT: Uses counter_decremented flag on the session to prevent
-    double-decrement if multiple dropout paths fire for the same session
-    (e.g., report_abandonment via sendBeacon AND cleanup_orphaned_sessions).
-
-    Called from: /report_abandonment, /finalize_no_session,
-    cleanup_orphaned_sessions, mark_interrupted_sessions_on_startup
-    """
-    if not session_record or not session_record.role:
-        return
-    if getattr(session_record, 'counter_decremented', False):
-        return  # Already decremented for this session
-
-    try:
-        counter = db_session.query(db.RoleAssignmentCounter).filter(
-            db.RoleAssignmentCounter.id == 1
-        ).with_for_update().first()
-
-        if counter:
-            role = session_record.role
-            if role == "interrogator" and counter.interrogator_count > 0:
-                counter.interrogator_count -= 1
-                print(f"📉 Decremented interrogator count to {counter.interrogator_count} (session {session_record.id[:8]}...)")
-            elif role == "witness" and counter.witness_count > 0:
-                counter.witness_count -= 1
-                print(f"📉 Decremented witness count to {counter.witness_count} (session {session_record.id[:8]}...)")
-
-            session_record.counter_decremented = True
-            # NOTE: caller is responsible for committing the transaction
-    except Exception as e:
-        print(f"❌ ERROR in decrement_role_counter: {e}")
-        db_session.rollback()
+# NOTE: decrement_role_counter is defined earlier in file (before startup cleanup)
 
 def requeue_or_timeout_session(session_record, db_session: Session, reason: str = "partner_dropped") -> str:
     """
@@ -1548,6 +1550,58 @@ async def health_check(db_session: Session = Depends(get_db)):
             "status": "unhealthy",
             "error": str(e)
         }
+
+# --- Admin Endpoint for Counter Reset (dev testing) ---
+@app.post("/admin/reset_counter")
+async def reset_role_counter(db_session: Session = Depends(get_db)):
+    """
+    Reset the role assignment counter to match actual active sessions.
+    USE WITH CAUTION - only for dev testing or fixing drift after Railway restarts.
+
+    To use: POST /admin/reset_counter?secret=turing2026
+    """
+    from fastapi import Query
+    # No auth for now, but could add a simple secret param
+
+    try:
+        # Count actual active/pre_consent sessions by role
+        actual_interrogators = db_session.query(db.StudySession).filter(
+            db.StudySession.role == "interrogator",
+            db.StudySession.session_status.in_(["active", "pre_consent"])
+        ).count()
+
+        actual_witnesses = db_session.query(db.StudySession).filter(
+            db.StudySession.role == "witness",
+            db.StudySession.session_status.in_(["active", "pre_consent"])
+        ).count()
+
+        # Get current counter
+        counter = db_session.query(db.RoleAssignmentCounter).filter(
+            db.RoleAssignmentCounter.id == 1
+        ).with_for_update().first()
+
+        if not counter:
+            counter = db.RoleAssignmentCounter(id=1, interrogator_count=0, witness_count=0)
+            db_session.add(counter)
+
+        old_i, old_w = counter.interrogator_count, counter.witness_count
+        counter.interrogator_count = actual_interrogators
+        counter.witness_count = actual_witnesses
+
+        db_session.commit()
+
+        print(f"🔧 COUNTER RESET: I={old_i}→{actual_interrogators}, W={old_w}→{actual_witnesses}")
+
+        return {
+            "status": "reset",
+            "old_counter": {"interrogator": old_i, "witness": old_w},
+            "new_counter": {"interrogator": actual_interrogators, "witness": actual_witnesses},
+            "message": "Counter synced to actual active sessions"
+        }
+    except Exception as e:
+        db_session.rollback()
+        return {"status": "error", "message": str(e)}
+
 
 # --- API Endpoints ---
 @app.get("/", response_class=HTMLResponse)
