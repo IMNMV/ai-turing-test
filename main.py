@@ -3410,7 +3410,6 @@ if __name__ == "__main__":
     if not GEMINI_MODEL:
         print("CRITICAL ERROR: Gemini model could not be initialized.")
     else:
-        # Corrected model name based on your `initialize_gemini_model_and_module`
         print("Gemini model initialized.")
     # For local testing, you would run with: uvicorn main:app --reload
     # Railway uses its own start command from railway.json
