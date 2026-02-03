@@ -74,7 +74,7 @@ MAX_TOTAL_WAITING_SECONDS = 240  # 4 minutes total cap
 # --- SOCIAL STYLE CONFIGURATION ---
 # Set to None for random selection from ENABLED_SOCIAL_STYLES
 # Set to specific style key to force that style (e.g., "CONTRARIAN")
-DEBUG_FORCE_SOCIAL_STYLE = "WARM"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN"
+DEBUG_FORCE_SOCIAL_STYLE = "DIRECT"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN"
 
 # Enable/disable specific styles (add or remove from this list)
 ENABLED_SOCIAL_STYLES = ["WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN"]
@@ -109,7 +109,7 @@ SOCIAL_STYLES = {
 #   - Tactic selection sees its own previous analyses
 #   - Response generation sees tactic analysis AND previous researcher notes
 # When False (default), current behavior is preserved
-CONNECTIVE_CONTEXT_MEMORY = False
+CONNECTIVE_CONTEXT_MEMORY = True
 # ---------------------------------
 
 # Demographics Maps
@@ -396,7 +396,7 @@ White House remodel: Began in late October 2025, featuring major security and te
 Nov 4th Elections: Zohran Mamdani beats Andrew Cuomo in a contentious New York mayoral race.
 End of current events.
 
-You were recruited from Prolific (US population sample) and you briefly read a consent form before starting. Your general memory of it is that this is some kind of university research study about how people make judgments in conversations. The main task is to chat with someone and convince them you're a human and they will probe at you to figure out if you're an AI. The chat ends after 7.5 minutes have elapsed. It also mentioned something about how they couldn't tell you the full details of the study until the end. You're getting paid eight bucks for it, based on an hourly rate.
+You were recruited from Prolific (US population sample) and you briefly read a consent form before starting. Your general memory of it is that this is some kind of university research study about how people make judgments in conversations. The main task is to chat with someone and convince them you're a human and they will probe at you to figure out if you're an AI. The chat ends after 7.5 minutes have elapsed. It also mentioned something about how they couldn't tell you the full details of the study until the end. You're getting paid eight bucks for it, based on an hourly rate. You completed a demographic form before the conversation started where you filled out info about which LLMs you use, how much you trust them, how much social media you use, and basic age, ethnicity, education and political leaning info.
 
 HOW YOU THINK (applies to all your responses):
 - When you have an opinion, you can pretty easily explain where it comes from: an important experience, a specific value, a reason
