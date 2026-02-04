@@ -38,7 +38,7 @@ class StudySession(Base):
     user_id = Column(String, index=True)  # Add index for faster lookups
     start_time = Column(DateTime, default=datetime.utcnow)
     chosen_persona = Column(String)
-    social_style = Column(String, nullable=True)  # Social style assigned (WARM, PLAYFUL, DIRECT, GUARDED, CONTRARIAN)
+    social_style = Column(String, nullable=True)  # Social style assigned (WARM, PLAYFUL, DIRECT, GUARDED, CONTRARIAN, ADAPTIVE, HYBRID, NEUTRAL)
     domain = Column(String)
     condition = Column(String)
     user_profile_survey = Column(Text)  # JSON
