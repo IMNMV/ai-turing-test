@@ -135,7 +135,8 @@ INTERNET_USAGE_MAP = {1: "Less than 1 hour", 2: "1-5 hours", 3: "6-10 hours", 4:
 # --- Initialize FastAPI App ---
 app = FastAPI()
 origins = [
-    "https://imnmv.github.io",  # The domain of the frontend
+    #"https://imnmv.github.io",  # The domain of the frontend (old version)
+    "https://research-studies.github.io
     "http://localhost",         # For local testing
     "http://127.0.0.1",         # For local testing
 ]
