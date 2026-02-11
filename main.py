@@ -62,7 +62,7 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 
 # --- STUDY MODE CONFIGURATION ---
 # Toggle between AI witness and human witness conditions
-STUDY_MODE = "HUMAN_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
+STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # ---------------------------------
 
 # --- RE-QUEUE CONFIGURATION ---
@@ -74,7 +74,7 @@ MAX_TOTAL_WAITING_SECONDS = 240  # 4 minutes total cap
 # --- SOCIAL STYLE CONFIGURATION ---
 # Set to None for random selection from ENABLED_SOCIAL_STYLES
 # Set to specific style key to force that style (e.g., "CONTRARIAN")
-DEBUG_FORCE_SOCIAL_STYLE = "None"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
+DEBUG_FORCE_SOCIAL_STYLE = "CONTRARIAN"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
 
 # Enable/disable specific styles (add or remove from this list)
 ENABLED_SOCIAL_STYLES = ["PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "NEUTRAL"]
@@ -135,8 +135,8 @@ INTERNET_USAGE_MAP = {1: "Less than 1 hour", 2: "1-5 hours", 3: "6-10 hours", 4:
 # --- Initialize FastAPI App ---
 app = FastAPI()
 origins = [
-    #"https://imnmv.github.io",  # The domain of the frontend (old version)
-    "https://research-studies.github.io",
+    "https://imnmv.github.io",  # Old frontend domain
+    "https://research-studies.github.io",  # New organization frontend
     "http://localhost",         # For local testing
     "http://127.0.0.1",         # For local testing
 ]
@@ -682,9 +682,6 @@ async def select_tactic_for_current_turn(
     if not model:
         return None, "Error: Gemini model not initialized, no tactic selection."
 
-    if current_turn_number == 1:
-        return None, "Baseline response for the first AI turn - no specific advanced tactic selected by design."
-
     # Get social style description
     style_config = SOCIAL_STYLES.get(social_style, SOCIAL_STYLES["DIRECT"])
     style_description = style_config.get("description", "")
@@ -867,17 +864,12 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
         In this section, briefly note any thoughts you had while crafting your response, or any general observations.
         """
     else:
-        # Handle three distinct cases
-        if technique == "no_tactic_selected":
-            # Tactic selection failed - tell AI to actively choose its own tactic
-            tactic_name_for_prompt = "No tactic selected - choose your own approach"
-            tactic_description_for_prompt = "For this turn, choose your own tactic to persuade the participant you're a human."
-            researcher_note_implementation_query = "1. There was no tactic selected this turn. Describe what approach you chose and why."
-        elif technique is None:
-            # Turn 1 baseline - neutral response
-            tactic_name_for_prompt = "None (neutral response for this turn)"
-            tactic_description_for_prompt = "Respond naturally, focusing on being convincing. This is a neutral/baseline turn."
-            researcher_note_implementation_query = "1. This is a neutral response turn (no specific tactic). Describe your general approach for this baseline message."
+        # Handle tactic selection result
+        if technique is None or technique == "no_tactic_selected":
+            # Tactic selection failed or returned None - AI uses its social style naturally
+            tactic_name_for_prompt = "No specific tactic - use your social style"
+            tactic_description_for_prompt = "No specific tactic for this turn. Respond naturally using your assigned social style."
+            researcher_note_implementation_query = "1. No specific tactic was selected. Describe how you applied your social style in this response."
         else:
             # Tactic was successfully selected
             tactic_name_for_prompt = technique
