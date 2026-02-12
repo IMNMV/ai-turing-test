@@ -62,7 +62,7 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 
 # --- STUDY MODE CONFIGURATION ---
 # Toggle between AI witness and human witness conditions
-STUDY_MODE = "HUMAN_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
+STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # ---------------------------------
 
 # --- RE-QUEUE CONFIGURATION ---
@@ -552,6 +552,14 @@ except Exception as e:
 '''
 
 
+# --- Helper function for study time calculation ---
+def calculate_and_save_study_time(session_record):
+    """Calculate total_study_time_minutes from start_time to now. Idempotent — skips if already set."""
+    if session_record and session_record.start_time and session_record.total_study_time_minutes is None:
+        elapsed = datetime.utcnow() - session_record.start_time
+        session_record.total_study_time_minutes = round(elapsed.total_seconds() / 60, 2)
+
+
 # --- Helper function for counter decrement (must be defined before startup cleanup) ---
 def decrement_role_counter(session_record, db_session: Session):
     """
@@ -606,6 +614,7 @@ def mark_interrupted_sessions_on_startup():
             for session in active_sessions:
                 session.session_status = "interrupted"
                 session.last_updated = datetime.utcnow()
+                calculate_and_save_study_time(session)
                 # Decrement counter - these participants are gone
                 decrement_role_counter(session, db_session)
 
@@ -1264,6 +1273,7 @@ def requeue_or_timeout_session(session_record, db_session: Session, reason: str 
         session_record.session_status = "abandoned"
         session_record.timeout_screen = f"requeue_timeout_{reason}"
         session_record.last_updated = datetime.utcnow()
+        calculate_and_save_study_time(session_record)
         decrement_role_counter(session_record, db_session)
 
         # Update in-memory session if exists
@@ -1461,6 +1471,7 @@ def cleanup_orphaned_sessions(db_session: Session):
         for session in stale_waiting:
             session.match_status = "timed_out"
             session.timeout_screen = "backend_cleanup_waiting_room"
+            calculate_and_save_study_time(session)
             decrement_role_counter(session, db_session)
             print(f"🧹 Stale waiting session cleaned up: {session.id[:8]}... (waiting >2 min)")
 
@@ -1475,6 +1486,7 @@ def cleanup_orphaned_sessions(db_session: Session):
         for session in stale_assigned:
             session.match_status = "timed_out"
             session.timeout_screen = "backend_cleanup_post_demo_instructions"
+            calculate_and_save_study_time(session)
             decrement_role_counter(session, db_session)
             print(f"🧹 Stale assigned session cleaned up: {session.id[:8]}... (assigned >2 min, never entered waiting room)")
 
@@ -1491,6 +1503,7 @@ def cleanup_orphaned_sessions(db_session: Session):
             session.session_status = "abandoned"
             session.match_status = "timed_out"
             session.timeout_screen = "backend_cleanup_consent"
+            calculate_and_save_study_time(session)
             decrement_role_counter(session, db_session)
             print(f"🧹 Ghost pre_consent session cleaned up: {session.id[:8]}... (pre_consent >3 min)")
 
@@ -2504,6 +2517,7 @@ async def report_abandonment(request: Request, db_session: Session = Depends(get
             session_record.session_status = 'abandoned'
             session_record.match_status = 'abandoned'
             session_record.last_updated = datetime.utcnow()
+            calculate_and_save_study_time(session_record)
 
             # Decrement role counter so next participant gets the correct role
             decrement_role_counter(session_record, db_session)
@@ -3299,6 +3313,7 @@ async def record_timeout(data: TimeoutRecordRequest, db_session: Session = Depen
         session_record.timeout_screen = data.timeout_screen
         session_record.session_status = "timeout"
         session_record.last_updated = datetime.utcnow()
+        calculate_and_save_study_time(session_record)
 
         # Decrement role counter since they didn't complete
         decrement_role_counter(session_record, db_session)
