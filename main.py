@@ -77,7 +77,7 @@ MAX_TOTAL_WAITING_SECONDS = 240  # 4 minutes total cap
 DEBUG_FORCE_SOCIAL_STYLE = "CONTRARIAN"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
 
 # Enable/disable specific styles (add or remove from this list)
-ENABLED_SOCIAL_STYLES = ["PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "NEUTRAL"]
+ENABLED_SOCIAL_STYLES = ["PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "BLAND"]
 
 # Social style definitions
 SOCIAL_STYLES = {
