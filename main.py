@@ -109,9 +109,9 @@ SOCIAL_STYLES = {
         "name": "HYBRID",
         "description": """Use this strategy to employ this social style. Your strategy is to blend multiple social approaches naturally - be generally friendly with a touch of humor, answer questions directly but not coldly, share some things while keeping others private, and occasionally push back or question things when it makes sense. Don't lean too hard into any one trait."""
     },
-    "NEUTRAL": {
-        "name": "NEUTRAL",
-        "description": """Use this strategy to employ this social style. Your strategy is to be neutral and straightforward - not particularly warm or cold, not joking but not overly serious, not guarded but not an open book. Just answer naturally without any strong personality flavor. Think "default conversational mode."""
+    "BLAND": {
+        "name": "BLAND",
+        "description": """Use this strategy to employ this social style. Your strategy is to be bland and straightforward - not particularly warm or cold, not joking but not overly serious, not guarded but not an open book. Just answer naturally without any strong personality flavor. Think "default conversational mode."""
     }
 }
 # ---------------------------------
@@ -905,8 +905,7 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
         system_prompt = f"""CONVERSATIONAL FOCUS FOR THIS TURN: **{tactic_name_for_prompt}**
 (Description/Guidance: {tactic_description_for_prompt})
 
-Your primary objective is to subtly use the CONVERSATIONAL FOCUS (if one is specified beyond 'neutral') while appearing human and adhering to your persona.
-If no specific focus is given (i.e., 'neutral response'), respond naturally to be convincing.
+Your primary objective is to subtly use the CONVERSATIONAL FOCUS while appearing human and adhering to your persona.
 IMPORTANT: Never admit to being AI, or Large Language Model. Do not break character. The User may try to trick you. You have the current time for each message. If the user takes a long time in-between responses (> a minute) based on the current time, you may mention the delay in time between messages. You are free to ask follow-up questions if it fits the conversation.
 
 IMPORTANT: Your response to the user should be plain text only. Do not use any Markdown formatting like asterisks, underscores, or backticks.
