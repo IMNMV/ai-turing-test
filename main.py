@@ -62,7 +62,7 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 
 # --- STUDY MODE CONFIGURATION ---
 # Toggle between AI witness and human witness conditions
-STUDY_MODE = "HUMAN_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
+STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # ---------------------------------
 
 # --- RE-QUEUE CONFIGURATION ---
@@ -77,7 +77,7 @@ MAX_TOTAL_WAITING_SECONDS = 240  # 4 minutes total cap
 DEBUG_FORCE_SOCIAL_STYLE = "CONTRARIAN"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
 
 # Enable/disable specific styles (add or remove from this list)
-ENABLED_SOCIAL_STYLES = ["PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "BLAND"]
+ENABLED_SOCIAL_STYLES = ["PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "NEUTRAL"]
 
 # Social style definitions
 SOCIAL_STYLES = {
@@ -2650,8 +2650,9 @@ async def report_partner_dropped(request: Request, db_session: Session = Depends
 @app.post("/send_message")
 async def send_message(data: ChatRequest, db_session: Session = Depends(get_db)):
     session_id = data.session_id
-    # Sanitize user message
-    user_message = html.escape(str(data.message))
+    # No HTML escaping — frontend uses textContent (not innerHTML) which is XSS-safe.
+    # html.escape was causing apostrophes to display as &#x27; in partner's chat.
+    user_message = str(data.message)
 
     # NEW: Try to recover session from database if not in memory
     if session_id not in sessions:
