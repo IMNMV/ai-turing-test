@@ -481,7 +481,7 @@ def initialize_gemini_models_and_module():
 
     # Model names
     primary_model_name = 'gemini-3-flash-preview'
-    fallback_model_name = 'gemini-2.5-flash'
+    fallback_model_name = 'gemini-3-flash-preview'
 
     # Create config with MINIMAL thinking level for Gemini 3 Flash (using string value)
     # Note: Gemini 3 Flash supports all four levels: "minimal", "low", "medium", "high"
