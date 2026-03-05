@@ -480,6 +480,8 @@ def initialize_gemini_models_and_module():
     )
 
     # Model names
+    # newest fastest: gemini-3.1-flash-lite-preview
+    # newest best: gemini-3-flash-preview
     primary_model_name = 'gemini-3-flash-preview'
     fallback_model_name = 'gemini-3-flash-preview'
 
