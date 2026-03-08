@@ -12,6 +12,7 @@ import html
 import re
 import asyncio
 import threading
+import copy
 from datetime import datetime, timedelta
 
 from fastapi import FastAPI, Request, Depends, HTTPException
@@ -111,7 +112,7 @@ SOCIAL_STYLES = {
     },
     "BLAND": {
         "name": "BLAND",
-        "description": """Use this strategy to employ this social style. Your strategy is to be bland - not particularly warm or cold, not joking but not overly serious, not guarded but not an open book. Just answer naturally without any strong personality flavor. Think "default conversational mode."""
+        "description": """Use this strategy to employ this social style. Your strategy is to be bland and straightforward - not particularly warm or cold, not joking but not overly serious, not guarded but not an open book. Just answer naturally without any strong personality flavor. Think "default conversational mode."""
     }
 }
 # ---------------------------------
@@ -1217,6 +1218,9 @@ class GetOrAssignRoleRequest(BaseModel):
     participant_id: str
     prolific_pid: Optional[str] = None
 
+class JoinWaitingRoomRequest(BaseModel):
+    session_id: str
+
 # --- End Pydantic Models ---
 
 # --- Human Witness Mode Helper Functions ---
@@ -1523,12 +1527,15 @@ def run_periodic_cleanup():
     """Background thread that runs cleanup every 1 minute (was 5, reduced for faster response)"""
     while True:
         time_module.sleep(60)  # 1 minute (faster cleanup to match 5-min user timeout rule)
+        db_session = None
         try:
             db_session = db.SessionLocal()
             cleanup_orphaned_sessions(db_session)
-            db_session.close()
         except Exception as e:
             print(f"Periodic cleanup error: {str(e)}")
+        finally:
+            if db_session:
+                db_session.close()
 
 # Start cleanup thread when server starts
 cleanup_thread = threading.Thread(target=run_periodic_cleanup, daemon=True)
@@ -1591,7 +1598,7 @@ async def get_home(request: Request):
     )
 
 @app.post("/get_or_assign_role")
-async def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session = Depends(get_db)):
+def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session = Depends(get_db)):
     """
     Assign role (interrogator or witness) to participant on page load.
 
@@ -2028,7 +2035,7 @@ async def enter_waiting_room(request: Request, db_session: Session = Depends(get
 
 
 @app.post("/join_waiting_room")
-async def join_waiting_room(request: Request, db_session: Session = Depends(get_db)):
+def join_waiting_room(data: JoinWaitingRoomRequest, db_session: Session = Depends(get_db)):
     """
     Called when user clicks "Enter Waiting Room" button.
     Uses PRE-ASSIGNED role from page load (assigned via /get_or_assign_role).
@@ -2037,8 +2044,7 @@ async def join_waiting_room(request: Request, db_session: Session = Depends(get_
     CRITICAL: Role was already assigned on page load using atomic counter.
     DO NOT re-assign role here or it will break the counter balance.
     """
-    data = await request.json()
-    session_id = data.get('session_id')
+    session_id = data.session_id
 
     print(f"🚪 JOIN_WAITING_ROOM: Session {session_id[:8]}... clicking button to enter")
 
@@ -2114,7 +2120,7 @@ async def join_waiting_room(request: Request, db_session: Session = Depends(get_
 
 
 @app.get("/check_match_status")
-async def check_match_status(session_id: str, db_session: Session = Depends(get_db)):
+def check_match_status(session_id: str, db_session: Session = Depends(get_db)):
     """
     Poll endpoint to check if participant has been matched with a partner.
     Called every 3 seconds from frontend while in waiting room.
@@ -2288,7 +2294,7 @@ async def study_status_ping(db_session: Session = Depends(get_db)):
 
 
 @app.get("/check_partner_message")
-async def check_partner_message(session_id: str, db_session: Session = Depends(get_db)):
+def check_partner_message(session_id: str, db_session: Session = Depends(get_db)):
     """
     Poll endpoint for human-human conversations.
     Checks if partner has sent a new message.
@@ -2385,8 +2391,8 @@ async def check_partner_message(session_id: str, db_session: Session = Depends(g
                 print(f"⚠️ MESSAGE GAP: Session {session_id[:8]}... - Partner turn {partner_turn}, my turn {my_turn}")
                 # Still continue - frontend will handle it
 
-            # Add partner's message to my conversation log
-            session['conversation_log'].append(latest_message)
+            # Add partner's message to my conversation log (deep copy to prevent shared mutation)
+            session['conversation_log'].append(copy.deepcopy(latest_message))
             session['turn_count'] = partner_turn
 
             print(f"✉️ MESSAGE DELIVERED: {partner_id[:8]}... -> {session_id[:8]}... (Turn {partner_turn})")
@@ -2713,7 +2719,12 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
             "artificial_delay_seconds": delay_seconds,  # NEW: For analysis
             "message_word_count": word_count,  # NEW: For analysis - correlate delay with length
             "delay_category_median": median_delay,  # NEW: Which category was used
-            "delay_category_std": std_delay  # NEW: Std dev for the category
+            "delay_category_std": std_delay,  # NEW: Std dev for the category
+            "timing": {
+                "network_delay_seconds": None,
+                "send_attempts": None,
+                "message_composition_time_seconds": data.message_composition_time_seconds
+            }
         }
 
         session["conversation_log"].append(turn_data)
@@ -2921,7 +2932,7 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
 
 
     if sleep_duration_needed > 0:
-        time.sleep(sleep_duration_needed)
+        await asyncio.sleep(sleep_duration_needed)
     # --- End NEW Delay Calculation ---
 
     # Check if this turn already exists in conversation_log (from frontend retry)
