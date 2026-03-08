@@ -111,7 +111,7 @@ SOCIAL_STYLES = {
     },
     "BLAND": {
         "name": "BLAND",
-        "description": """Use this strategy to employ this social style. Your strategy is to be bland and straightforward - not particularly warm or cold, not joking but not overly serious, not guarded but not an open book. Just answer naturally without any strong personality flavor. Think "default conversational mode."""
+        "description": """Use this strategy to employ this social style. Your strategy is to be bland - not particularly warm or cold, not joking but not overly serious, not guarded but not an open book. Just answer naturally without any strong personality flavor. Think "default conversational mode."""
     }
 }
 # ---------------------------------
