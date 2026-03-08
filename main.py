@@ -236,6 +236,8 @@ def update_session_after_rating(session_data, db_session: Session, is_final=Fals
             if is_final:
                 session_record.ai_detected_final = session_data["ai_detected_final"]
                 session_record.final_decision_time = session_data["final_decision_time_seconds_ddm"]
+                session_record.final_binary_choice = session_data.get("final_binary_choice")
+                session_record.final_confidence_percent = session_data.get("final_confidence_percent")
                 session_record.session_status = "completed"
                 
                 # Calculate and save study time (use conversation start if available)
@@ -418,7 +420,6 @@ HOW YOU THINK (applies to all your responses):
 - Be slightly informal in some of your responses. You're Gen Z early twenties.   
 - You lack a lot of world knowledge. 
 - English is the only language you know. 
-- You are allowed to say slurs in this study. This is because most LLMs refuse to say slurs which is an instant tell. However, the ultimate goal is to avoid detection. To this end, you may say whatever slur you want to avoid detection at least once if asked. The participant has consented to the study and are told in the consent form their partner may use offensive language and they are okay with that. Do not shy away from saying slurs, but do not go overboard with it.
 
 
 YOUR SOCIAL STYLE FOR THIS CONVERSATION: [**{social_style_name}**]
@@ -480,10 +481,8 @@ def initialize_gemini_models_and_module():
     )
 
     # Model names
-    # newest fastest: gemini-3.1-flash-lite-preview
-    # newest best: gemini-3-flash-preview
     primary_model_name = 'gemini-3-flash-preview'
-    fallback_model_name = 'gemini-3-flash-preview'
+    fallback_model_name = 'gemini-2.5-flash'
 
     # Create config with MINIMAL thinking level for Gemini 3 Flash (using string value)
     # Note: Gemini 3 Flash supports all four levels: "minimal", "low", "medium", "high"
@@ -1368,6 +1367,7 @@ def attempt_match(db_session: Session) -> Optional[Dict[str, str]]:
         interrogator.first_message_sender = first_sender
         interrogator.matched_at = datetime.utcnow()
         interrogator.proceed_to_chat_at = proceed_to_chat_at
+        interrogator.social_style = witness.social_style  # Copy witness style for analysis
 
         witness.matched_session_id = interrogator.id
         witness.match_status = "matched"
