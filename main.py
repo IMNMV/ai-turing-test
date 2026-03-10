@@ -77,6 +77,9 @@ MAX_TOTAL_WAITING_SECONDS = 240  # 4 minutes total cap
 # Set to specific style key to force that style (e.g., "CONTRARIAN")
 DEBUG_FORCE_SOCIAL_STYLE = "WARM"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
 
+# Assignment strategy: "counterbalanced" (least-used from DB) or "random" (random.choice)
+SOCIAL_STYLE_ASSIGNMENT = "counterbalanced"  # "counterbalanced" for production, "random" for testing
+
 # Enable/disable specific styles (add or remove from this list)
 ENABLED_SOCIAL_STYLES = ["PLAYFUL", "WARM", "GUARDED", "CONTRARIAN", "BLAND"]
 
@@ -1131,6 +1134,33 @@ def assign_domain():
     experimental_condition_type = "not_applicable_due_to_domain_logic_removal"
     return domain_for_conversation, experimental_condition_type
 
+def assign_social_style_counterbalanced(db_session: Session) -> str:
+    """Assign the least-used social style from ENABLED_SOCIAL_STYLES.
+    Queries completed/active sessions in DB, picks the style with fewest assignments.
+    Ties are broken randomly for fairness."""
+    from sqlalchemy import func
+
+    # Count assignments per style (only non-abandoned sessions with a real style)
+    style_counts = db_session.query(
+        db.StudySession.social_style,
+        func.count(db.StudySession.id)
+    ).filter(
+        db.StudySession.social_style.in_(ENABLED_SOCIAL_STYLES),
+        db.StudySession.session_status.notin_(["abandoned", "pre_consent"])
+    ).group_by(db.StudySession.social_style).all()
+
+    count_map = {style: 0 for style in ENABLED_SOCIAL_STYLES}
+    for style, count in style_counts:
+        if style in count_map:
+            count_map[style] = count
+
+    min_count = min(count_map.values())
+    least_used = [s for s, c in count_map.items() if c == min_count]
+
+    chosen = random.choice(least_used)
+    print(f"📊 Counterbalanced style assignment: {count_map} → chose {chosen} (min={min_count}, ties={len(least_used)})")
+    return chosen
+
 # CSV functions removed - now using database
 
 
@@ -1693,6 +1723,8 @@ def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session = Depen
             # Respect DEBUG_FORCE_SOCIAL_STYLE if set
             if DEBUG_FORCE_SOCIAL_STYLE and DEBUG_FORCE_SOCIAL_STYLE in ENABLED_SOCIAL_STYLES:
                 assigned_social_style = DEBUG_FORCE_SOCIAL_STYLE
+            elif SOCIAL_STYLE_ASSIGNMENT == "counterbalanced":
+                assigned_social_style = assign_social_style_counterbalanced(db_session)
             else:
                 assigned_social_style = random.choice(ENABLED_SOCIAL_STYLES)
 
@@ -2000,11 +2032,13 @@ async def enter_waiting_room(request: Request, db_session: Session = Depends(get
             db_session.commit()
 
         # AI MODE: Assign a social style for the AI witness to use
-        # Respect DEBUG_FORCE_SOCIAL_STYLE if set, otherwise randomize
+        # Respect DEBUG_FORCE_SOCIAL_STYLE if set, otherwise use assignment strategy
         ai_social_style = session.get('social_style')
         if not ai_social_style:
             if DEBUG_FORCE_SOCIAL_STYLE and DEBUG_FORCE_SOCIAL_STYLE in ENABLED_SOCIAL_STYLES:
                 ai_social_style = DEBUG_FORCE_SOCIAL_STYLE
+            elif SOCIAL_STYLE_ASSIGNMENT == "counterbalanced":
+                ai_social_style = assign_social_style_counterbalanced(db_session)
             else:
                 ai_social_style = random.choice(ENABLED_SOCIAL_STYLES)
             session['social_style'] = ai_social_style
