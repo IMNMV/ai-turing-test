@@ -63,7 +63,7 @@ DEBUG_FORCE_PERSONA = "custom_extrovert"
 
 # --- STUDY MODE CONFIGURATION ---
 # Toggle between AI witness and human witness conditions
-STUDY_MODE = "AI_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
+STUDY_MODE = "HUMAN_WITNESS"  # Options: "AI_WITNESS" or "HUMAN_WITNESS"
 # ---------------------------------
 
 # --- RE-QUEUE CONFIGURATION ---
@@ -75,7 +75,7 @@ MAX_TOTAL_WAITING_SECONDS = 240  # 4 minutes total cap
 # --- SOCIAL STYLE CONFIGURATION ---
 # Set to None for random selection from ENABLED_SOCIAL_STYLES
 # Set to specific style key to force that style (e.g., "CONTRARIAN")
-DEBUG_FORCE_SOCIAL_STYLE = "WARM"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
+DEBUG_FORCE_SOCIAL_STYLE = "None"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
 
 # Assignment strategy: "counterbalanced" (least-used from DB) or "random" (random.choice)
 SOCIAL_STYLE_ASSIGNMENT = "counterbalanced"  # "counterbalanced" for production, "random" for testing
@@ -3372,6 +3372,35 @@ async def record_timeout(data: TimeoutRecordRequest, db_session: Session = Depen
     else:
         print(f"⚠️ Could not find session to record timeout for participant {data.participant_id[:8]}...")
         return {"success": False, "message": "Session not found, timeout logged but not saved to DB"}
+
+
+@app.post("/record_completion_code")
+async def record_completion_code(request: Request, db_session: Session = Depends(get_db)):
+    """Record which Prolific completion code was sent, called via sendBeacon before redirect."""
+    try:
+        data = await request.json()
+    except Exception:
+        body = await request.body()
+        data = json.loads(body) if body else {}
+
+    session_id = data.get('session_id') or data.get('participant_id')
+    code = data.get('completion_code')
+
+    if not session_id or not code:
+        return {"success": False, "message": "Missing session_id or completion_code"}
+
+    session_record = db_session.query(db.StudySession).filter(
+        db.StudySession.id == session_id
+    ).first()
+
+    if session_record:
+        session_record.prolific_completion_code = code
+        session_record.last_updated = datetime.utcnow()
+        db_session.commit()
+        print(f"📋 Completion code recorded: {session_id[:8]}... → {code}")
+        return {"success": True}
+
+    return {"success": False, "message": "Session not found"}
 
 
 @app.post("/submit_final_comment")
