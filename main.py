@@ -1167,13 +1167,15 @@ def assign_social_style_counterbalanced(db_session: Session) -> str:
     Ties are broken randomly for fairness."""
     from sqlalchemy import func
 
-    # Count assignments per style (only non-abandoned sessions with a real style)
+    # Count ALL assignments per style (only exclude abandoned — dead sessions)
+    # pre_consent must be included because styles are assigned at role time
+    # when session is still pre_consent
     style_counts = db_session.query(
         db.StudySession.social_style,
         func.count(db.StudySession.id)
     ).filter(
         db.StudySession.social_style.in_(ENABLED_SOCIAL_STYLES),
-        db.StudySession.session_status.notin_(["abandoned", "pre_consent"])
+        db.StudySession.session_status != "abandoned"
     ).group_by(db.StudySession.social_style).all()
 
     count_map = {style: 0 for style in ENABLED_SOCIAL_STYLES}
