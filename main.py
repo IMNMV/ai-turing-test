@@ -1196,6 +1196,16 @@ def assign_social_style_counterbalanced(db_session: Session) -> str:
 
 # --- Pydantic Models (UNCHANGED) ---
 class InitializeRequest(BaseModel):
+    # Identifiers
+    participant_id: Optional[str] = None
+    prolific_pid: Optional[str] = None
+    # Pre-assigned role (from /get_or_assign_role)
+    role: str  # "interrogator" or "witness"
+    social_style: Optional[str] = None  # Social style if witness (e.g., "WARM", "PLAYFUL")
+
+
+class SubmitDemographicsRequest(BaseModel):
+    session_id: str
     # AI Experience
     ai_usage_frequency: int
     ai_models_used: List[str]
@@ -1203,22 +1213,15 @@ class InitializeRequest(BaseModel):
     others_detection_speed: int
     ai_capabilities_rating: int
     trust_in_ai: int
-
     # Demographics
     age: int
     gender: str
     education: str
     ethnicity: List[str]
     income: str
-    political_affiliation: str  # NEW: Political party/ideology
-    social_media_platforms: List[str]  # NEW: Social media usage (check all)
-    internet_usage_per_week: int  # NEW: Hours of internet use per week
-    # Identifiers
-    participant_id: Optional[str] = None
-    prolific_pid: Optional[str] = None
-    # NEW: Pre-assigned role (from /get_or_assign_role)
-    role: str  # "interrogator" or "witness"
-    social_style: Optional[str] = None  # Social style if witness (e.g., "WARM", "PLAYFUL")
+    political_affiliation: str
+    social_media_platforms: List[str]
+    internet_usage_per_week: int
 
 class ChatRequest(BaseModel):
     session_id: str
@@ -1861,28 +1864,8 @@ async def initialize_study(data: InitializeRequest, db_session: Session = Depend
             # All data is safely stored in database
             return {"session_id": session_id, "message": "Study already initialized."}
     
-    # Create the full user profile from all the new fields
-    # Sanitize text inputs
-    sanitized_models = [html.escape(str(model)) for model in data.ai_models_used]
-    sanitized_ethnicity = [html.escape(str(eth)) for eth in data.ethnicity]
-    sanitized_social_media = [html.escape(str(platform)) for platform in data.social_media_platforms]
-
-    initial_user_profile_from_survey = {
-        "ai_usage_frequency": data.ai_usage_frequency,
-        "ai_models_used": sanitized_models,
-        "self_detection_speed": data.self_detection_speed,
-        "others_detection_speed": data.others_detection_speed,
-        "ai_capabilities_rating": data.ai_capabilities_rating,
-        "trust_in_ai": data.trust_in_ai,
-        "age": data.age,
-        "gender": html.escape(str(data.gender)),
-        "education": html.escape(str(data.education)),
-        "ethnicity": sanitized_ethnicity,
-        "income": html.escape(str(data.income)),
-        "political_affiliation": html.escape(str(data.political_affiliation)),
-        "social_media_platforms": sanitized_social_media,
-        "internet_usage_per_week": data.internet_usage_per_week
-    }
+    # Demographics are now submitted separately after the conversation via /submit_demographics
+    initial_user_profile_from_survey = {"pending": True}
     
     assigned_context_for_convo, experimental_condition_val = assign_domain()
 
@@ -3450,6 +3433,50 @@ async def submit_final_comment(data: FinalCommentRequest, db_session: Session = 
     db_session.commit()
     print(f"Final comment added to session {data.session_id}.")
     return {"message": "Final comment received. Thank you."}
+
+
+@app.post("/submit_demographics")
+async def submit_demographics(data: SubmitDemographicsRequest, db_session: Session = Depends(get_db)):
+    """Submit demographics after the conversation (moved from pre-study to post-feedback)."""
+    session_record = db_session.query(db.StudySession).filter(
+        db.StudySession.id == data.session_id
+    ).first()
+    if not session_record:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    # Sanitize text inputs
+    sanitized_models = [html.escape(str(model)) for model in data.ai_models_used]
+    sanitized_ethnicity = [html.escape(str(eth)) for eth in data.ethnicity]
+    sanitized_social_media = [html.escape(str(platform)) for platform in data.social_media_platforms]
+
+    user_profile = {
+        "ai_usage_frequency": data.ai_usage_frequency,
+        "ai_models_used": sanitized_models,
+        "self_detection_speed": data.self_detection_speed,
+        "others_detection_speed": data.others_detection_speed,
+        "ai_capabilities_rating": data.ai_capabilities_rating,
+        "trust_in_ai": data.trust_in_ai,
+        "age": data.age,
+        "gender": html.escape(str(data.gender)),
+        "education": html.escape(str(data.education)),
+        "ethnicity": sanitized_ethnicity,
+        "income": html.escape(str(data.income)),
+        "political_affiliation": html.escape(str(data.political_affiliation)),
+        "social_media_platforms": sanitized_social_media,
+        "internet_usage_per_week": data.internet_usage_per_week
+    }
+
+    session_record.user_profile_survey = json.dumps(user_profile)
+    session_record.last_updated = datetime.utcnow()
+
+    # Also update in-memory session if it exists
+    if data.session_id in sessions:
+        sessions[data.session_id]["initial_user_profile_survey"] = user_profile
+
+    db_session.commit()
+    print(f"📋 Demographics submitted for session {data.session_id[:8]}...")
+    return {"success": True, "message": "Demographics saved."}
+
 
 @app.post("/finalize_no_session")
 async def finalize_no_session(data: FinalizeNoSessionRequest, db_session: Session = Depends(get_db)):
