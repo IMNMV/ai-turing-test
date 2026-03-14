@@ -88,6 +88,7 @@ class StudySession(Base):
     proceed_to_chat_at = Column(DateTime, nullable=True)  # When both can proceed (10s after later entry)
     witness_instructions_version = Column(String, nullable=True)  # Track which instructions shown to witness
     prolific_completion_code = Column(String, nullable=True)  # Which Prolific code was sent: CR0KFVQO, C120SCQ9, C1B54A7Q, C19WFTZR, CZSGWT2I
+    study_mode = Column(String, nullable=True, index=True)  # "AI_WITNESS" or "HUMAN_WITNESS" — which condition this session ran under
 
 
 class DroppedParticipant(Base):
