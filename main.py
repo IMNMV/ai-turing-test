@@ -2978,13 +2978,17 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
     # Calculate how much *additional* sleep is needed
     sleep_duration_needed = target_visible_response_time_paper_model - time_spent_on_actual_ai_calls
 
-    # Enforce minimum 14s total visible delay (matches human mode floor)
-    # so AI responses are never suspiciously faster than human responses
-    MIN_TOTAL_VISIBLE_DELAY = 14.0
+    # Enforce minimum delay with jitter (matches human mode range)
+    # Floor: 14-16s random, Ceiling: 23s (same as HUMAN_MESSAGE_DELAY_CEILING)
+    # so AI responses are never suspiciously faster or slower than human responses
+    min_delay_floor = np.random.uniform(14.0, 16.0)
     total_visible_time = time_spent_on_actual_ai_calls + max(0, sleep_duration_needed)
-    if total_visible_time < MIN_TOTAL_VISIBLE_DELAY:
-        sleep_duration_needed = MIN_TOTAL_VISIBLE_DELAY - time_spent_on_actual_ai_calls
-        print(f"--- DEBUG: Applied {MIN_TOTAL_VISIBLE_DELAY}s minimum delay floor: total would have been {total_visible_time:.3f}s ---")
+    if total_visible_time < min_delay_floor:
+        sleep_duration_needed = min_delay_floor - time_spent_on_actual_ai_calls
+        print(f"--- DEBUG: Applied {min_delay_floor:.1f}s minimum delay floor: total would have been {total_visible_time:.3f}s ---")
+    elif total_visible_time > HUMAN_MESSAGE_DELAY_CEILING:
+        sleep_duration_needed = HUMAN_MESSAGE_DELAY_CEILING - time_spent_on_actual_ai_calls
+        print(f"--- DEBUG: Capped at {HUMAN_MESSAGE_DELAY_CEILING}s ceiling: total would have been {total_visible_time:.3f}s ---")
     
     print(f"--- DEBUG: Time spent on actual AI calls: {time_spent_on_actual_ai_calls:.3f}s ---")
     print(f"--- DEBUG: Sleep duration needed (Paper Model): {sleep_duration_needed:.3f}s ---")
