@@ -516,16 +516,27 @@ def initialize_gemini_models_and_module():
     primary_model_name = 'gemini-3-flash-preview'
     fallback_model_name = 'gemini-2.5-flash'
 
+    # Safety settings — disable all content filtering for Turing test conversations
+    safety_settings = [
+        types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+        types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+        types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+        types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
+    ]
+
     # Create config with MINIMAL thinking level for Gemini 3 Flash (using string value)
     # Note: Gemini 3 Flash supports all four levels: "minimal", "low", "medium", "high"
     minimal_thinking_config = types.GenerateContentConfig(
         thinking_config=types.ThinkingConfig(
             thinking_level="minimal"  # Use string value (SDK v1.51.0+)
-        )
+        ),
+        safety_settings=safety_settings
     )
 
     # For fallback model (Gemini 2.5 Flash - doesn't support thinking_level)
-    standard_config = types.GenerateContentConfig()
+    standard_config = types.GenerateContentConfig(
+        safety_settings=safety_settings
+    )
 
     return client, primary_model_name, fallback_model_name, minimal_thinking_config, standard_config, genai, types
 
@@ -781,18 +792,12 @@ Your output MUST be in the following format:
 CHOSEN TACTIC: [A brief description of the approach]
 JUSTIFICATION: [Why this fits the person's mental state and the current moment in the conversation. Include a predicted effectiveness rating (1-100).]
 """
-    safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        ]
     # Retry logic with exponential backoff and jitter
     max_retries = 3
 
     for attempt in range(1, max_retries + 1):
         try:
-            # Use new Client API with minimal thinking config
+            # Use new Client API with minimal thinking config (safety_settings included in config)
             response = await asyncio.to_thread(
                 model.models.generate_content,
                 model=GEMINI_PRO_MODEL_NAME,
@@ -963,12 +968,6 @@ In your RESEARCHER_NOTES, include:
 4. What information you were attempting to elicit (if any).
 5. If you were told to generate your own tactic for this turn, list the tactic you selected here and why.
 """
-    safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        ]
     # Retry logic with exponential backoff and jitter
     max_retries = 3
     response = None
@@ -979,7 +978,7 @@ In your RESEARCHER_NOTES, include:
         # === PRIMARY MODEL BLOCK (retry loop + response processing) ===
         for attempt in range(1, max_retries + 1):
             try:
-                # --- ATTEMPT: PRIMARY MODEL (NON-BLOCKING) ---
+                # --- ATTEMPT: PRIMARY MODEL (NON-BLOCKING) --- (safety_settings included in config)
                 response = await asyncio.to_thread(
                     GEMINI_CLIENT.models.generate_content,
                     model=GEMINI_PRO_MODEL_NAME,
