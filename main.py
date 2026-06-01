@@ -3423,6 +3423,14 @@ async def record_completion_code(request: Request, db_session: Session = Depends
     ).first()
 
     if session_record:
+        existing_code = session_record.prolific_completion_code
+        # Safety net: never let the abandon code (CZSGWT2I) overwrite a real completion code.
+        # This prevents the race where the unload handler's beacon arrives after a timeout/completion beacon.
+        ABANDON_CODE = 'CZSGWT2I'
+        if code == ABANDON_CODE and existing_code and existing_code != ABANDON_CODE:
+            print(f"🛡️ Blocked abandon code overwrite: {session_id[:8]}... already has {existing_code}, ignoring {code}")
+            return {"success": True, "message": "Existing code preserved"}
+
         session_record.prolific_completion_code = code
         session_record.last_updated = datetime.utcnow()
         db_session.commit()
