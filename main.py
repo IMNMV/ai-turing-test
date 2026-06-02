@@ -78,7 +78,7 @@ MAX_TOTAL_WAITING_SECONDS = 240  # 4 minutes total cap
 DEBUG_FORCE_SOCIAL_STYLE = None  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
 
 # Assignment strategy: "counterbalanced" (least-used from DB) or "random" (random.choice)
-SOCIAL_STYLE_ASSIGNMENT = "counterbalanced"  # "counterbalanced" for production, "random" for testing
+SOCIAL_STYLE_ASSIGNMENT = "random"  # "counterbalanced" for production, "random" for testing
 
 # Enable/disable specific styles (add or remove from this list)
 ENABLED_SOCIAL_STYLES = ["PLAYFUL", "WARM", "GUARDED", "CONTRARIAN", "BLAND"]
