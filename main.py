@@ -75,13 +75,13 @@ MAX_TOTAL_WAITING_SECONDS = 240  # 4 minutes total cap
 # --- SOCIAL STYLE CONFIGURATION ---
 # Set to None for random selection from ENABLED_SOCIAL_STYLES
 # Set to specific style key to force that style (e.g., "CONTRARIAN")
-DEBUG_FORCE_SOCIAL_STYLE = "HYBRID"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
+DEBUG_FORCE_SOCIAL_STYLE = "TURING"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
 
 # Assignment strategy: "counterbalanced" (least-used from DB) or "random" (random.choice)
 SOCIAL_STYLE_ASSIGNMENT = "counterbalanced"  # "counterbalanced" for production, "random" for testing
 
 # Enable/disable specific styles (add or remove from this list)
-ENABLED_SOCIAL_STYLES = ["PLAYFUL", "WARM", "GUARDED", "CONTRARIAN", "BLAND"]
+ENABLED_SOCIAL_STYLES = ["TURING", "CHILL"]
 
 # Social style definitions
 SOCIAL_STYLES = {
@@ -105,13 +105,13 @@ SOCIAL_STYLES = {
         "name": "CONTRARIAN",
         "description": """Use this strategy to employ this social style. Your strategy is that you're contrarian, pushing back, playing devil's advocate, questioning things."""
     },
-    "ADAPTIVE": {
-        "name": "ADAPTIVE",
-        "description": """Use this strategy to employ this social style. Your strategy is to adapt your tone to match the conversation - mirror the other person's energy and style. If they're casual, be casual. If they're serious, be serious. If they joke, you can joke back. Read the room and adjust accordingly."""
+    "TURING": {
+        "name": "TURING",
+        "description": """Use this strategy to employ this social style. Your strategy is to use the outlined rules and things to incorporate/avoid."""
     },
-    "HYBRID": {
-        "name": "HYBRID",
-        "description": """Use this strategy to employ this social style. Your strategy is to blend multiple social approaches naturally - be generally friendly with a touch of humor, answer questions directly but not coldly, share some things while keeping others private, and occasionally push back or question things when it makes sense. Don't lean too hard into any one trait."""
+    "CHILL": {
+        "name": "CHILL",
+        "description": """Use this strategy to employ this social style. Your strategy is not to be too laid back. Just a normal person trying to get the task done. Keep responses to 3-11 words and follow the elements outlined in the rules and things to incorporate/avoid."""
     },
     "BLAND": {
         "name": "BLAND",
