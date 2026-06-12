@@ -75,7 +75,7 @@ MAX_TOTAL_WAITING_SECONDS = 240  # 4 minutes total cap
 # --- SOCIAL STYLE CONFIGURATION ---
 # Set to None for random selection from ENABLED_SOCIAL_STYLES
 # Set to specific style key to force that style (e.g., "CONTRARIAN")
-DEBUG_FORCE_SOCIAL_STYLE = "TURING"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
+DEBUG_FORCE_SOCIAL_STYLE = "CHILL"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
 
 # Assignment strategy: "counterbalanced" (least-used from DB) or "random" (random.choice)
 SOCIAL_STYLE_ASSIGNMENT = "counterbalanced"  # "counterbalanced" for production, "random" for testing
@@ -593,7 +593,9 @@ def initialize_gemini_models_and_module():
     )
 
     # Model names
-    primary_model_name = 'gemini-3-flash-preview'
+    primary_model_name = 'gemini-3.5-flash'
+    #primary_model_name = 'gemini-3-flash-preview'
+
     fallback_model_name = 'gemini-2.5-flash'
 
     # Safety settings — disable all content filtering for Turing test conversations
