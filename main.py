@@ -158,6 +158,7 @@ app.add_middleware(
 # templates = Jinja2Templates(directory="interaction-study-main-2")
 
 # --- Database Imports ---
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 import database as db
 
@@ -193,6 +194,7 @@ def create_initial_session_record(session_data, db_session: Session):
             study_mode=STUDY_MODE,
             last_updated=datetime.utcnow()
         )
+        update_suspicious_behavior_summary(db_study_session, ui_events)
         db_session.add(db_study_session)
         db_session.commit()
         print(f"Initial session record created for {session_data['session_id']}")
@@ -210,7 +212,9 @@ def update_session_after_message(session_data, db_session: Session):
             session_record.conversation_log = json.dumps(session_data["conversation_log"])
             session_record.tactic_selection_log = json.dumps(session_data["tactic_selection_log"])
             session_record.ai_researcher_notes = json.dumps(session_data["ai_researcher_notes_log"])
+            session_record.interrogator_turn_judgment_log = json.dumps(session_data.get("intermediate_ddm_confidence_ratings", []))
             session_record.ui_event_log = json.dumps(session_data.get("ui_event_log", []))
+            update_suspicious_behavior_summary(session_record, session_data.get("ui_event_log", []))
             session_record.last_updated = datetime.utcnow()
             db_session.commit()
             print(f"Session updated after message for {session_data['session_id']}, turn {session_data['turn_count']}")
@@ -227,8 +231,10 @@ def update_session_after_rating(session_data, db_session: Session, is_final=Fals
         if session_record:
             # Always update confidence ratings and timing data
             session_record.ddm_confidence_ratings = json.dumps(session_data["intermediate_ddm_confidence_ratings"])
+            session_record.interrogator_turn_judgment_log = json.dumps(session_data["intermediate_ddm_confidence_ratings"])
             session_record.feels_off_comments = json.dumps(session_data["feels_off_data"])
             session_record.ui_event_log = json.dumps(session_data.get("ui_event_log", []))
+            update_suspicious_behavior_summary(session_record, session_data.get("ui_event_log", []))
             
             # Update pure DDM data if present
             if "pure_ddm_decision" in session_data:
@@ -236,13 +242,23 @@ def update_session_after_rating(session_data, db_session: Session, is_final=Fals
                 session_record.pure_ddm_timestamp = session_data["pure_ddm_timestamp"]
                 session_record.pure_ddm_turn_number = session_data["pure_ddm_turn_number"]
                 session_record.pure_ddm_decision_time_seconds = session_data["pure_ddm_decision_time_seconds"]
+
+            if "first_confidence_slider_endpoint_value_percent" in session_data:
+                session_record.first_confidence_slider_endpoint_value_percent = session_data["first_confidence_slider_endpoint_value_percent"]
+                session_record.first_confidence_slider_endpoint_choice = session_data["first_confidence_slider_endpoint_choice"]
+                session_record.first_confidence_slider_endpoint_timestamp = session_data["first_confidence_slider_endpoint_timestamp"]
+                session_record.first_confidence_slider_endpoint_turn_number = session_data["first_confidence_slider_endpoint_turn_number"]
+                session_record.first_confidence_slider_endpoint_decision_time_seconds = session_data["first_confidence_slider_endpoint_decision_time_seconds"]
             
             # If this is the final rating (study completed)
             if is_final:
-                session_record.ai_detected_final = session_data["ai_detected_final"]
-                session_record.final_decision_time = session_data["final_decision_time_seconds_ddm"]
-                session_record.final_binary_choice = session_data.get("final_binary_choice")
-                session_record.final_confidence_percent = session_data.get("final_confidence_percent")
+                set_interrogator_final_response(
+                    session_record,
+                    session_data.get("final_binary_choice"),
+                    session_data.get("final_confidence_percent"),
+                    session_data.get("final_decision_time_seconds_ddm"),
+                    session_data.get("final_response_reason", "time_expired")
+                )
                 session_record.session_status = "completed"
                 
                 # Calculate and save study time (use conversation start if available)
@@ -327,7 +343,7 @@ def recover_session_from_database(session_id: str, db_session: Session):
             "tactic_selection_log": json.loads(session_record.tactic_selection_log) if session_record.tactic_selection_log else [],
             "initial_tactic_analysis": {"full_analysis": session_record.initial_tactic_analysis or "N/A"},
             "ai_detected_final": session_record.ai_detected_final,
-            "intermediate_ddm_confidence_ratings": json.loads(session_record.ddm_confidence_ratings) if session_record.ddm_confidence_ratings else [],
+            "intermediate_ddm_confidence_ratings": json.loads(session_record.interrogator_turn_judgment_log or session_record.ddm_confidence_ratings) if (session_record.interrogator_turn_judgment_log or session_record.ddm_confidence_ratings) else [],
             "feels_off_data": json.loads(session_record.feels_off_comments) if session_record.feels_off_comments else [],
             "final_decision_time_seconds_ddm": session_record.final_decision_time,
             "last_ai_response_timestamp_for_ddm": None,
@@ -342,6 +358,18 @@ def recover_session_from_database(session_id: str, db_session: Session):
             recovered_session["pure_ddm_timestamp"] = session_record.pure_ddm_timestamp
             recovered_session["pure_ddm_turn_number"] = session_record.pure_ddm_turn_number
             recovered_session["pure_ddm_decision_time_seconds"] = session_record.pure_ddm_decision_time_seconds
+
+        if session_record.first_confidence_slider_endpoint_value_percent is not None:
+            recovered_session["first_confidence_slider_endpoint_value_percent"] = session_record.first_confidence_slider_endpoint_value_percent
+            recovered_session["first_confidence_slider_endpoint_choice"] = session_record.first_confidence_slider_endpoint_choice
+            recovered_session["first_confidence_slider_endpoint_timestamp"] = session_record.first_confidence_slider_endpoint_timestamp
+            recovered_session["first_confidence_slider_endpoint_turn_number"] = session_record.first_confidence_slider_endpoint_turn_number
+            recovered_session["first_confidence_slider_endpoint_decision_time_seconds"] = session_record.first_confidence_slider_endpoint_decision_time_seconds
+
+        if session_record.interrogator_final_binary_choice:
+            recovered_session["final_binary_choice"] = session_record.interrogator_final_binary_choice
+            recovered_session["final_confidence_percent"] = session_record.interrogator_final_confidence_percent
+            recovered_session["final_response_reason"] = session_record.interrogator_final_response_reason
 
         # Add human witness mode fields
         if session_record.role:
@@ -358,6 +386,10 @@ def recover_session_from_database(session_id: str, db_session: Session):
             recovered_session["matched_at"] = session_record.matched_at
         if session_record.proceed_to_chat_at:
             recovered_session["proceed_to_chat_at"] = session_record.proceed_to_chat_at
+        if session_record.conversation_phase_reached:
+            recovered_session["conversation_phase_reached"] = True
+        if session_record.conversation_started_at:
+            recovered_session["conversation_start_time"] = session_record.conversation_started_at.timestamp()
 
         print(f"✅ Session {session_id[:8]}... recovered successfully")
         return recovered_session
@@ -372,6 +404,41 @@ def get_current_time_string():
     eastern = pytz.timezone('US/Eastern')
     current_time = datetime.now(eastern)
     return current_time.strftime("%I:%M %p on %A, %B %d, %Y")
+
+
+def calculate_per_character_response_delay(response_char_count: int, previous_message_char_count: int) -> Dict[str, Any]:
+    """Calculate response delay from the per-character + gamma formulation."""
+    response_char_count = max(0, int(response_char_count or 0))
+    previous_message_char_count = max(0, int(previous_message_char_count or 0))
+
+    response_char_rate = max(0, np.random.normal(RESPONSE_DELAY_PER_CHAR_MEAN, RESPONSE_DELAY_PER_CHAR_STD))
+    previous_message_char_rate = max(0, np.random.normal(RESPONSE_DELAY_PER_PREV_CHAR_MEAN, RESPONSE_DELAY_PER_PREV_CHAR_STD))
+    thinking_time_delay = np.random.gamma(RESPONSE_DELAY_THINKING_SHAPE, RESPONSE_DELAY_THINKING_SCALE)
+
+    base_delay = RESPONSE_DELAY_MIN_BASE_SECONDS
+    response_typing_delay = response_char_rate * response_char_count
+    previous_message_reading_delay = previous_message_char_rate * previous_message_char_count
+    total_delay = (
+        base_delay
+        + response_typing_delay
+        + previous_message_reading_delay
+        + thinking_time_delay
+    )
+
+    return {
+        "total_delay_seconds": float(total_delay),
+        "base_delay_seconds": float(base_delay),
+        "response_char_count": response_char_count,
+        "response_char_rate": float(response_char_rate),
+        "response_typing_delay_seconds": float(response_typing_delay),
+        "previous_message_char_count": previous_message_char_count,
+        "previous_message_char_rate": float(previous_message_char_rate),
+        "previous_message_reading_delay_seconds": float(previous_message_reading_delay),
+        "thinking_time_delay_seconds": float(thinking_time_delay),
+        "thinking_shape": RESPONSE_DELAY_THINKING_SHAPE,
+        "thinking_scale": RESPONSE_DELAY_THINKING_SCALE,
+        "formula": "base + response_char_rate * response_chars + previous_message_char_rate * previous_message_chars + gamma(shape, scale)"
+    }
 
 
 # --- Psychological Tactics (REMOVED - Free-form selection) ---
@@ -685,6 +752,260 @@ def calculate_and_save_study_time(session_record):
     if session_record and session_record.start_time and session_record.total_study_time_minutes is None:
         elapsed = datetime.utcnow() - session_record.start_time
         session_record.total_study_time_minutes = round(elapsed.total_seconds() / 60, 2)
+
+
+def mark_conversation_phase_reached(session_record):
+    """Mark sessions that reached the phase where a final judgment is expected."""
+    if not session_record:
+        return
+    session_record.conversation_phase_reached = True
+    if session_record.conversation_started_at is None:
+        session_record.conversation_started_at = datetime.utcnow()
+
+
+def set_interrogator_final_response(session_record, binary_choice, confidence_percent, decision_time_seconds, reason):
+    """Persist the interrogator's final human/AI judgment using explicit confirmatory fields."""
+    if not session_record:
+        return
+    session_record.interrogator_final_binary_choice = binary_choice
+    session_record.interrogator_final_confidence_percent = confidence_percent
+    session_record.interrogator_final_decision_time_seconds = decision_time_seconds
+    session_record.interrogator_final_response_collected = True
+    session_record.interrogator_final_response_reason = reason
+    session_record.interrogator_final_response_not_collected_reason = None
+
+    # Compatibility fields retained for old exports/dashboards.
+    session_record.final_binary_choice = binary_choice
+    session_record.final_confidence_percent = confidence_percent
+    session_record.ai_detected_final = (binary_choice == "ai") if binary_choice else None
+    session_record.final_decision_time = decision_time_seconds
+
+
+def set_witness_final_response(session_record, partner_belief, choice_time_ms=None, reason="witness_final_response"):
+    """Persist the witness's belief about their partner separately from interrogator judgments."""
+    if not session_record:
+        return
+    session_record.witness_final_partner_belief = partner_belief
+    session_record.witness_final_partner_belief_choice_time_ms = choice_time_ms
+    session_record.witness_final_response_collected = True
+    session_record.witness_final_response_reason = reason
+    session_record.witness_final_response_not_collected_reason = None
+
+
+def mark_final_response_not_collected(session_record, reason):
+    """Record why a conversation-phase participant lacks the expected final judgment."""
+    if not session_record or not getattr(session_record, "conversation_phase_reached", False):
+        return
+
+    if session_record.role == "witness":
+        if not getattr(session_record, "witness_final_response_collected", False):
+            session_record.witness_final_response_collected = False
+            session_record.witness_final_response_not_collected_reason = reason
+    else:
+        if not getattr(session_record, "interrogator_final_response_collected", False):
+            session_record.interrogator_final_response_collected = False
+            session_record.interrogator_final_response_not_collected_reason = reason
+
+
+SUSPICIOUS_UI_EVENTS = {
+    "tab_hidden",
+    "window_blur",
+    "paste",
+    "copy",
+    "contextmenu",
+    "text_selection",
+    "pagehide",
+    "beforeinput",
+    "text_growth_anomaly",
+    "large_message_after_inactivity",
+    "drop",
+    "untrusted_input_event",
+    "automation_fingerprint",
+    "page_lifecycle_freeze",
+    "page_lifecycle_resume",
+    "page_lifecycle_pageshow",
+    "page_lifecycle_beforeunload",
+    "navigation_warning_shown",
+    "navigation_abandonment",
+}
+
+
+def update_suspicious_behavior_summary(session_record, events):
+    """Summarize suspicious browser behavior from raw ui_event_log events."""
+    if not session_record:
+        return
+
+    suspicious_count = 0
+    tab_hidden_count = 0
+    total_tab_hidden_ms = 0.0
+    window_blur_count = 0
+    paste_count = 0
+    copy_count = 0
+    context_menu_count = 0
+    selection_count = 0
+    page_exit_count = 0
+    pasted_text_entries = []
+    beforeinput_count = 0
+    beforeinput_paste_count = 0
+    beforeinput_drop_count = 0
+    beforeinput_replacement_count = 0
+    text_growth_anomaly_count = 0
+    large_message_after_inactivity_count = 0
+    drop_count = 0
+    textarea_focus_count = 0
+    textarea_blur_count = 0
+    untrusted_input_count = 0
+    automation_fingerprint_count = 0
+    automation_webdriver_detected = False
+    lifecycle_freeze_count = 0
+    lifecycle_resume_count = 0
+    lifecycle_pageshow_count = 0
+    lifecycle_beforeunload_count = 0
+    provenance_counts = {
+        "typed_only": 0,
+        "pasted": 0,
+        "dropped": 0,
+        "large_jump": 0,
+        "mixed": 0,
+        "unknown": 0,
+    }
+    max_chars_per_second = None
+    max_message_length_chars = 0
+    total_keydown_count = 0
+    total_backspace_delete_count = 0
+    total_long_pause_count = 0
+
+    def safe_float(value, default=0.0):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def safe_int(value, default=0):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    for event in events or []:
+        event_name = event.get("event")
+        metadata = event.get("metadata") or {}
+
+        if event_name in SUSPICIOUS_UI_EVENTS:
+            suspicious_count += 1
+        if event_name == "tab_hidden":
+            tab_hidden_count += 1
+        elif event_name == "tab_visible":
+            try:
+                total_tab_hidden_ms += float(metadata.get("hidden_duration_ms") or 0)
+            except (TypeError, ValueError):
+                pass
+        elif event_name == "window_blur":
+            window_blur_count += 1
+        elif event_name == "paste":
+            paste_count += 1
+            pasted_text = metadata.get("pasted_text")
+            if pasted_text:
+                pasted_text_entries.append({
+                    "timestamp": event.get("timestamp") or event.get("ts_client"),
+                    "turn": metadata.get("turn"),
+                    "role": metadata.get("role"),
+                    "field": metadata.get("field"),
+                    "target": metadata.get("target"),
+                    "pasted_char_count": metadata.get("pasted_char_count"),
+                    "pasted_word_count": metadata.get("pasted_word_count"),
+                    "pasted_text": pasted_text,
+                })
+        elif event_name == "copy":
+            copy_count += 1
+        elif event_name == "contextmenu":
+            context_menu_count += 1
+        elif event_name == "text_selection":
+            selection_count += 1
+        elif event_name in ("pagehide", "navigation_warning_shown", "navigation_abandonment"):
+            page_exit_count += 1
+        elif event_name == "beforeinput":
+            beforeinput_count += 1
+            input_type = metadata.get("input_type")
+            if input_type == "insertFromPaste":
+                beforeinput_paste_count += 1
+            elif input_type == "insertFromDrop":
+                beforeinput_drop_count += 1
+            elif input_type in ("insertReplacementText", "insertFromYank"):
+                beforeinput_replacement_count += 1
+        elif event_name == "text_growth_anomaly":
+            text_growth_anomaly_count += 1
+        elif event_name == "large_message_after_inactivity":
+            large_message_after_inactivity_count += 1
+        elif event_name == "drop":
+            drop_count += 1
+        elif event_name == "textarea_focus":
+            textarea_focus_count += 1
+        elif event_name == "textarea_blur":
+            textarea_blur_count += 1
+        elif event_name == "untrusted_input_event":
+            untrusted_input_count += 1
+        elif event_name == "automation_fingerprint":
+            automation_fingerprint_count += 1
+            automation_webdriver_detected = automation_webdriver_detected or bool(metadata.get("navigator_webdriver"))
+        elif event_name == "page_lifecycle_freeze":
+            lifecycle_freeze_count += 1
+        elif event_name == "page_lifecycle_resume":
+            lifecycle_resume_count += 1
+        elif event_name == "page_lifecycle_pageshow":
+            lifecycle_pageshow_count += 1
+        elif event_name == "page_lifecycle_beforeunload":
+            lifecycle_beforeunload_count += 1
+        elif event_name == "message_input_provenance":
+            category = metadata.get("provenance_category") or "unknown"
+            if category not in provenance_counts:
+                category = "unknown"
+            provenance_counts[category] += 1
+            max_message_length_chars = max(max_message_length_chars, safe_int(metadata.get("message_length_chars")))
+            cps = safe_float(metadata.get("chars_per_second"), None)
+            if cps is not None:
+                max_chars_per_second = cps if max_chars_per_second is None else max(max_chars_per_second, cps)
+            total_keydown_count += safe_int(metadata.get("keydown_count"))
+            total_backspace_delete_count += safe_int(metadata.get("backspace_delete_count"))
+            total_long_pause_count += safe_int(metadata.get("long_pause_count"))
+
+    session_record.suspicious_behavior_event_count = suspicious_count
+    session_record.tab_hidden_count = tab_hidden_count
+    session_record.total_tab_hidden_ms = total_tab_hidden_ms
+    session_record.window_blur_count = window_blur_count
+    session_record.paste_event_count = paste_count
+    session_record.copy_event_count = copy_count
+    session_record.context_menu_event_count = context_menu_count
+    session_record.text_selection_event_count = selection_count
+    session_record.page_exit_event_count = page_exit_count
+    session_record.pasted_text_log = json.dumps(pasted_text_entries) if pasted_text_entries else None
+    session_record.beforeinput_event_count = beforeinput_count
+    session_record.beforeinput_paste_event_count = beforeinput_paste_count
+    session_record.beforeinput_drop_event_count = beforeinput_drop_count
+    session_record.beforeinput_replacement_event_count = beforeinput_replacement_count
+    session_record.text_growth_anomaly_count = text_growth_anomaly_count
+    session_record.large_message_after_inactivity_count = large_message_after_inactivity_count
+    session_record.drop_event_count = drop_count
+    session_record.textarea_focus_count = textarea_focus_count
+    session_record.textarea_blur_count = textarea_blur_count
+    session_record.untrusted_input_event_count = untrusted_input_count
+    session_record.automation_webdriver_detected = automation_webdriver_detected
+    session_record.automation_fingerprint_event_count = automation_fingerprint_count
+    session_record.page_lifecycle_freeze_count = lifecycle_freeze_count
+    session_record.page_lifecycle_resume_count = lifecycle_resume_count
+    session_record.page_lifecycle_pageshow_count = lifecycle_pageshow_count
+    session_record.page_lifecycle_beforeunload_count = lifecycle_beforeunload_count
+    session_record.input_provenance_typed_only_message_count = provenance_counts["typed_only"]
+    session_record.input_provenance_pasted_message_count = provenance_counts["pasted"]
+    session_record.input_provenance_dropped_message_count = provenance_counts["dropped"]
+    session_record.input_provenance_large_jump_message_count = provenance_counts["large_jump"]
+    session_record.input_provenance_mixed_message_count = provenance_counts["mixed"]
+    session_record.input_provenance_unknown_message_count = provenance_counts["unknown"]
+    session_record.max_message_chars_per_second = max_chars_per_second
+    session_record.max_message_length_chars = max_message_length_chars
+    session_record.total_message_keydown_count = total_keydown_count
+    session_record.total_message_backspace_delete_count = total_backspace_delete_count
+    session_record.total_message_long_pause_count = total_long_pause_count
 
 
 # --- Helper function for counter decrement (must be defined before startup cleanup) ---
@@ -1316,6 +1637,7 @@ class ChatRequest(BaseModel):
     typing_indicator_delay_seconds: Optional[float] = None
     network_delay_seconds: Optional[float] = None
     message_composition_time_seconds: Optional[float] = None  # Time from first keystroke to send
+    input_provenance_summary: Optional[Dict[str, Any]] = None
     time_remaining_display: Optional[str] = None  # Countdown timer value from frontend (e.g. "04:32")
 
 class ConversationStartRequest(BaseModel):
@@ -1338,6 +1660,8 @@ class RatingRequest(BaseModel):
     reading_time_seconds: Optional[float] = None
     active_decision_time_seconds: Optional[float] = None
     slider_interaction_log: Optional[List[Dict[str, Any]]] = None
+    is_final_response: Optional[bool] = False
+    final_response_reason: Optional[str] = None
 
 class CommentRequest(BaseModel):
     session_id: str
@@ -1358,6 +1682,9 @@ class FinalCommentRequest(BaseModel):
     session_id: str
     comment: str
     binary_choice: Optional[str] = None  # NEW: For witnesses - 'human' or 'ai'
+    binary_choice_time_ms: Optional[float] = None
+    final_response_reason: Optional[str] = None
+    input_provenance_summary: Optional[Dict[str, Any]] = None
 
 class FinalizeNoSessionRequest(BaseModel):
     participant_id: str
@@ -1702,7 +2029,7 @@ async def health_check(db_session: Session = Depends(get_db)):
     """
     try:
         # Check database connection
-        db_session.execute("SELECT 1")
+        db_session.execute(text("SELECT 1"))
 
         # Count active sessions
         active_count = len([s for s in sessions.values() if s.get('session_status') == 'active'])
@@ -1876,6 +2203,62 @@ def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session = Depen
                 existing_session.match_status = "unmatched"
                 existing_session.counter_decremented = False  # Reset for new session
                 existing_session.study_mode = STUDY_MODE
+                existing_session.conversation_phase_reached = False
+                existing_session.conversation_started_at = None
+                existing_session.interrogator_turn_judgment_log = None
+                existing_session.first_confidence_slider_endpoint_value_percent = None
+                existing_session.first_confidence_slider_endpoint_choice = None
+                existing_session.first_confidence_slider_endpoint_timestamp = None
+                existing_session.first_confidence_slider_endpoint_turn_number = None
+                existing_session.first_confidence_slider_endpoint_decision_time_seconds = None
+                existing_session.interrogator_final_binary_choice = None
+                existing_session.interrogator_final_confidence_percent = None
+                existing_session.interrogator_final_decision_time_seconds = None
+                existing_session.interrogator_final_response_collected = False
+                existing_session.interrogator_final_response_reason = None
+                existing_session.interrogator_final_response_not_collected_reason = None
+                existing_session.witness_final_partner_belief = None
+                existing_session.witness_final_partner_belief_choice_time_ms = None
+                existing_session.witness_final_response_collected = False
+                existing_session.witness_final_response_reason = None
+                existing_session.witness_final_response_not_collected_reason = None
+                existing_session.suspicious_behavior_event_count = 0
+                existing_session.tab_hidden_count = 0
+                existing_session.total_tab_hidden_ms = 0
+                existing_session.window_blur_count = 0
+                existing_session.paste_event_count = 0
+                existing_session.copy_event_count = 0
+                existing_session.context_menu_event_count = 0
+                existing_session.text_selection_event_count = 0
+                existing_session.page_exit_event_count = 0
+                existing_session.pasted_text_log = None
+                existing_session.beforeinput_event_count = 0
+                existing_session.beforeinput_paste_event_count = 0
+                existing_session.beforeinput_drop_event_count = 0
+                existing_session.beforeinput_replacement_event_count = 0
+                existing_session.text_growth_anomaly_count = 0
+                existing_session.large_message_after_inactivity_count = 0
+                existing_session.drop_event_count = 0
+                existing_session.textarea_focus_count = 0
+                existing_session.textarea_blur_count = 0
+                existing_session.untrusted_input_event_count = 0
+                existing_session.automation_webdriver_detected = False
+                existing_session.automation_fingerprint_event_count = 0
+                existing_session.page_lifecycle_freeze_count = 0
+                existing_session.page_lifecycle_resume_count = 0
+                existing_session.page_lifecycle_pageshow_count = 0
+                existing_session.page_lifecycle_beforeunload_count = 0
+                existing_session.input_provenance_typed_only_message_count = 0
+                existing_session.input_provenance_pasted_message_count = 0
+                existing_session.input_provenance_dropped_message_count = 0
+                existing_session.input_provenance_large_jump_message_count = 0
+                existing_session.input_provenance_mixed_message_count = 0
+                existing_session.input_provenance_unknown_message_count = 0
+                existing_session.max_message_chars_per_second = None
+                existing_session.max_message_length_chars = 0
+                existing_session.total_message_keydown_count = 0
+                existing_session.total_message_backspace_delete_count = 0
+                existing_session.total_message_long_pause_count = 0
                 existing_session.last_updated = datetime.utcnow()
                 db_session.commit()
                 print(f"✅ Reset existing DB record for {participant_id[:8]}... (pre-consent, was {existing_session.session_status})")
@@ -2663,6 +3046,7 @@ async def report_abandonment(request: Request, db_session: Session = Depends(get
             session_record.match_status = 'abandoned'
             session_record.last_updated = datetime.utcnow()
             calculate_and_save_study_time(session_record)
+            mark_final_response_not_collected(session_record, reason)
 
             # Decrement role counter so next participant gets the correct role
             decrement_role_counter(session_record, db_session)
@@ -2824,21 +3208,20 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         partner = sessions[partner_session_id]
         current_turn = session["turn_count"] + 1
 
-        # NEW: Calculate artificial delay based on message length (empirical data)
-        # Count words in message
+        # Calculate artificial delivery delay from the same per-character
+        # formulation used for AI responses.
         word_count = len(user_message.split())
+        previous_message_char_count = 0
+        if session.get("conversation_log"):
+            previous_turn = session["conversation_log"][-1]
+            previous_message = previous_turn.get("user") or previous_turn.get("assistant") or ""
+            previous_message_char_count = len(previous_message)
 
-        # Find appropriate delay parameters based on word count
-        median_delay, std_delay = (19.1, 4.17)  # Default to 21-40 words category
-        for (min_words, max_words), (median, std) in HUMAN_MESSAGE_DELAY_BY_LENGTH.items():
-            if min_words <= word_count <= max_words:
-                median_delay, std_delay = median, std
-                break
-
-        # Sample from normal distribution using median and observed std dev
-        delay_seconds = np.random.normal(median_delay, std_delay)
-        delay_seconds = min(delay_seconds, HUMAN_MESSAGE_DELAY_CEILING)  # Clamp at ceiling
-        delay_seconds = max(delay_seconds, 5.0)  # Minimum 5s delay to prevent unrealistically fast responses
+        delay_components = calculate_per_character_response_delay(
+            len(user_message),
+            previous_message_char_count
+        )
+        delay_seconds = delay_components["total_delay_seconds"]
 
         # Calculate when this message should be delivered to partner
         sent_time = datetime.utcnow().timestamp()
@@ -2852,15 +3235,20 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
             "sender_role": session.get('role', 'unknown'),
             "timestamp": sent_time,
             "message_composition_time_seconds": data.message_composition_time_seconds,  # Time to type message
+            "input_provenance_summary": data.input_provenance_summary,
             "delivery_time": delivery_time,  # NEW: When message should be delivered to partner
             "artificial_delay_seconds": delay_seconds,  # NEW: For analysis
-            "message_word_count": word_count,  # NEW: For analysis - correlate delay with length
-            "delay_category_median": median_delay,  # NEW: Which category was used
-            "delay_category_std": std_delay,  # NEW: Std dev for the category
+            "artificial_delay_components": delay_components,
+            "message_word_count": word_count,  # Compatibility/analysis
+            "message_char_count": len(user_message),
+            "previous_message_char_count": previous_message_char_count,
             "timing": {
                 "network_delay_seconds": None,
                 "send_attempts": None,
-                "message_composition_time_seconds": data.message_composition_time_seconds
+                "message_composition_time_seconds": data.message_composition_time_seconds,
+                "input_provenance_summary": data.input_provenance_summary,
+                "artificial_delay_seconds": delay_seconds,
+                "artificial_delay_components": delay_components
             }
         }
 
@@ -2870,7 +3258,7 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         # Save to database
         update_session_after_message(session, db_session)
 
-        print(f"Human-human message sent: {session.get('role')} ({session_id[:8]}...) -> {partner.get('role')} ({partner_session_id[:8]}...) | Words: {word_count}, Delay: {delay_seconds:.2f}s (median={median_delay:.1f}s)")
+        print(f"Human-human message sent: {session.get('role')} ({session_id[:8]}...) -> {partner.get('role')} ({partner_session_id[:8]}...) | Chars: {len(user_message)}, Delay: {delay_seconds:.2f}s")
 
         return {
             "human_partner": True,
@@ -3027,49 +3415,17 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
 
     time_spent_on_actual_ai_calls = time.time() - actual_ai_processing_start_time
 
-    # --- NEW: Calculate delay based on the paper's formula ---
-    # Term 1: Minimum base delay
-    delay = RESPONSE_DELAY_MIN_BASE_SECONDS
-
-    # Term 2: Delay per character of the AI's response (typing speed)
-    # np.random.normal might return negative if mean is small and std is relatively large. Clamp at 0.
-    per_char_delay_rate = max(0, np.random.normal(RESPONSE_DELAY_PER_CHAR_MEAN, RESPONSE_DELAY_PER_CHAR_STD))
-    delay += per_char_delay_rate * ai_text_length
-    print(f"--- DEBUG: Delay after term 2 (typing): {delay:.3f}s (per_char_rate: {per_char_delay_rate:.4f})")
-
-
-    # Term 3: Delay per character of the previous message (user's message this turn, reading time)
-    per_prev_char_delay_rate = max(0, np.random.normal(RESPONSE_DELAY_PER_PREV_CHAR_MEAN, RESPONSE_DELAY_PER_PREV_CHAR_STD))
-    #delay += per_prev_char_delay_rate * char_count_prev_message_for_ai # Use the char count of the message the AI is responding to
-    delay += per_prev_char_delay_rate * current_user_message_char_count # Use the char count of the message the AI is responding to
-
-    print(f"--- DEBUG: Delay after term 3 (reading): {delay:.3f}s (prev_char_rate: {per_prev_char_delay_rate:.4f}, prev_msg_len: {char_count_prev_message_for_ai})")
-
-
-    # Term 4: Right-skewed delay for thinking time (Gamma distribution)
-    thinking_time_delay = np.random.gamma(RESPONSE_DELAY_THINKING_SHAPE, RESPONSE_DELAY_THINKING_SCALE)
-    delay += thinking_time_delay
-    print(f"--- DEBUG: Delay after term 4 (thinking): {delay:.3f}s (gamma_val: {thinking_time_delay:.3f})")
-
-    # This 'delay' is the total *target* visible response time from the paper's perspective
-    target_visible_response_time_paper_model = delay
+    # Calculate delay from the per-character + gamma formulation.
+    delay_components = calculate_per_character_response_delay(
+        ai_text_length,
+        current_user_message_char_count
+    )
+    target_visible_response_time_paper_model = delay_components["total_delay_seconds"]
     print(f"--- DEBUG: Target visible response time (Paper Model): {target_visible_response_time_paper_model:.3f}s ---")
 
 
     # Calculate how much *additional* sleep is needed
-    sleep_duration_needed = target_visible_response_time_paper_model - time_spent_on_actual_ai_calls
-
-    # Enforce minimum delay with jitter (matches human mode range)
-    # Floor: 14-16s random, Ceiling: 23s (same as HUMAN_MESSAGE_DELAY_CEILING)
-    # so AI responses are never suspiciously faster or slower than human responses
-    min_delay_floor = np.random.uniform(14.0, 16.0)
-    total_visible_time = time_spent_on_actual_ai_calls + max(0, sleep_duration_needed)
-    if total_visible_time < min_delay_floor:
-        sleep_duration_needed = min_delay_floor - time_spent_on_actual_ai_calls
-        print(f"--- DEBUG: Applied {min_delay_floor:.1f}s minimum delay floor: total would have been {total_visible_time:.3f}s ---")
-    elif total_visible_time > HUMAN_MESSAGE_DELAY_CEILING:
-        sleep_duration_needed = HUMAN_MESSAGE_DELAY_CEILING - time_spent_on_actual_ai_calls
-        print(f"--- DEBUG: Capped at {HUMAN_MESSAGE_DELAY_CEILING}s ceiling: total would have been {total_visible_time:.3f}s ---")
+    sleep_duration_needed = max(0, target_visible_response_time_paper_model - time_spent_on_actual_ai_calls)
     
     print(f"--- DEBUG: Time spent on actual AI calls: {time_spent_on_actual_ai_calls:.3f}s ---")
     print(f"--- DEBUG: Sleep duration needed (Paper Model): {sleep_duration_needed:.3f}s ---")
@@ -3098,12 +3454,16 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         "assistant_timestamp": ai_response_timestamp,
         "tactic_used": tactic_key_for_this_turn,
         "tactic_selection_justification": tactic_sel_justification,
+        "input_provenance_summary": data.input_provenance_summary,
         "timing": {
             "api_call_time_seconds": time_spent_on_actual_ai_calls,
             "sleep_duration_seconds": sleep_duration_needed,
+            "target_visible_response_time_seconds": target_visible_response_time_paper_model,
+            "response_delay_components": delay_components,
             "typing_indicator_delay_seconds": data.typing_indicator_delay_seconds,
             "network_delay_seconds": None,  # Will be updated by separate network delay endpoint
-            "message_composition_time_seconds": data.message_composition_time_seconds  # Time from first keystroke to send
+            "message_composition_time_seconds": data.message_composition_time_seconds,  # Time from first keystroke to send
+            "input_provenance_summary": data.input_provenance_summary
         }
     }
 
@@ -3170,6 +3530,7 @@ async def log_conversation_start(data: ConversationStartRequest, db_session: Ses
 
     session = sessions[session_id]
     session["conversation_start_time"] = time.time()
+    session["conversation_phase_reached"] = True
 
     # Update match status to "matched" when conversation starts (for AI mode simulated match)
     if session.get('match_status') == 'waiting':
@@ -3181,8 +3542,16 @@ async def log_conversation_start(data: ConversationStartRequest, db_session: Ses
             db.StudySession.id == session_id
         ).first()
         if session_record:
+            mark_conversation_phase_reached(session_record)
             session_record.match_status = 'matched'
             session_record.matched_at = datetime.utcnow()
+            db_session.commit()
+    else:
+        session_record = db_session.query(db.StudySession).filter(
+            db.StudySession.id == session_id
+        ).first()
+        if session_record:
+            mark_conversation_phase_reached(session_record)
             db_session.commit()
 
     # Comprehensive conversation start logging
@@ -3322,16 +3691,30 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
         "slider_interaction_log": data.slider_interaction_log
     })
 
-    # NEW: Check if this is the first pure DDM decision (0.0 or 1.0)
-    is_pure_decision = data.confidence == 0.0 or data.confidence == 1.0
-    first_pure_decision = is_pure_decision and "pure_ddm_decision" not in session
+    # Legacy compatibility: the old DDM-era code captured the first slider endpoint.
+    # In the confirmatory study this is NOT a human-vs-AI direction; it is simply
+    # the first confidence endpoint (0% or 100%) after a binary choice.
+    confidence_percent = data.confidence_percent
+    if confidence_percent is None:
+        confidence_percent = int(round(data.confidence * 100))
+
+    is_confidence_endpoint = confidence_percent in (0, 100)
+    first_confidence_endpoint = is_confidence_endpoint and "first_confidence_slider_endpoint_value_percent" not in session
     
-    if first_pure_decision:
+    if first_confidence_endpoint:
+        session["first_confidence_slider_endpoint_value_percent"] = confidence_percent
+        session["first_confidence_slider_endpoint_choice"] = data.binary_choice
+        session["first_confidence_slider_endpoint_timestamp"] = datetime.now()
+        session["first_confidence_slider_endpoint_turn_number"] = session["turn_count"]
+        session["first_confidence_slider_endpoint_decision_time_seconds"] = actual_decision_time
+
+        # Populate legacy fields for old exports, but do not use these names in
+        # confirmatory analyses.
         session["pure_ddm_decision"] = data.confidence
-        session["pure_ddm_timestamp"] = datetime.now()
+        session["pure_ddm_timestamp"] = session["first_confidence_slider_endpoint_timestamp"]
         session["pure_ddm_turn_number"] = session["turn_count"]
         session["pure_ddm_decision_time_seconds"] = actual_decision_time
-        print(f"Pure DDM decision captured: {data.confidence} at turn {session['turn_count']}")
+        print(f"First confidence slider endpoint captured: {confidence_percent}%/{data.binary_choice} at turn {session['turn_count']}")
 
     # Calculate total study time and check for forced completion
     # Use conversation start time if available, otherwise fall back to session start
@@ -3352,15 +3735,19 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
     update_session_after_rating(session, db_session, is_final=False)
     
     study_over = False
-    if forced_completion:  # 7.5 minutes elapsed
-        # NEW: Study ends when time expires and participant submits their rating (binary choice + confidence)
-        # No longer require exactly 0 or 1 - the binary choice is the decision, confidence is always 0-100%
+    should_finalize_interrogator = forced_completion or bool(data.is_final_response)
+    final_response_reason = data.final_response_reason or ("time_expired" if forced_completion else "explicit_final_response")
+
+    if should_finalize_interrogator:
+        # Study/conversation ends when the final binary choice + confidence has
+        # been collected. The binary choice is the direction; confidence is 0-100%.
 
         # Use binary choice to determine if AI was detected
         session["ai_detected_final"] = (data.binary_choice == 'ai')
         session["final_binary_choice"] = data.binary_choice
-        session["final_confidence_percent"] = data.confidence_percent
+        session["final_confidence_percent"] = confidence_percent
         session["final_decision_time_seconds_ddm"] = actual_decision_time
+        session["final_response_reason"] = final_response_reason
         
         # NEW: Final save with completion status
         update_session_after_rating(session, db_session, is_final=True)
@@ -3412,14 +3799,21 @@ async def submit_comment(data: CommentRequest, db_session: Session = Depends(get
         "phase": data.phase
     })
 
-    # If this is the final comment, update the CSV file that was already saved.
+    # Legacy path: older clients may send final/pre-debrief comments here.
+    # CSV persistence was removed, so persist the comment to the DB record.
     if data.phase == 'pre_debrief':
-        update_final_comment_in_csv(session)
+        session_record = db_session.query(db.StudySession).filter(
+            db.StudySession.id == session_id
+        ).first()
+        if session_record:
+            session_record.final_user_comment = sanitized_comment
+            session_record.last_updated = datetime.utcnow()
+            db_session.commit()
 
     return {"message": "Comment submitted."}
 
 @app.post("/log_ui_event")
-async def log_ui_event(evt: UIEventRequest):
+async def log_ui_event(evt: UIEventRequest, db_session: Session = Depends(get_db)):
     event_record = {
         "event": evt.event,
         "ts_client": evt.ts_client,
@@ -3432,10 +3826,38 @@ async def log_ui_event(evt: UIEventRequest):
     # If we have a live session, attach to it; otherwise store pre-session
     if evt.session_id and evt.session_id in sessions:
         sessions[evt.session_id].setdefault("ui_event_log", []).append(event_record)
+        try:
+            session_record = db_session.query(db.StudySession).filter(
+                db.StudySession.id == evt.session_id
+            ).first()
+            if session_record:
+                events = json.loads(session_record.ui_event_log) if session_record.ui_event_log else []
+                events.append(event_record)
+                session_record.ui_event_log = json.dumps(events)
+                update_suspicious_behavior_summary(session_record, events)
+                session_record.last_updated = datetime.utcnow()
+                db_session.commit()
+        except Exception as e:
+            print(f"Warning: Could not persist UI event immediately: {e}")
+            db_session.rollback()
         return {"message": "Event logged to session."}
     
     if evt.participant_id:
         pre_session_events.setdefault(evt.participant_id, []).append(event_record)
+        try:
+            session_record = db_session.query(db.StudySession).filter(
+                db.StudySession.id == evt.participant_id
+            ).first()
+            if session_record:
+                events = json.loads(session_record.ui_event_log) if session_record.ui_event_log else []
+                events.append(event_record)
+                session_record.ui_event_log = json.dumps(events)
+                update_suspicious_behavior_summary(session_record, events)
+                session_record.last_updated = datetime.utcnow()
+                db_session.commit()
+        except Exception as e:
+            print(f"Warning: Could not persist pre-session UI event immediately: {e}")
+            db_session.rollback()
         return {"message": "Event logged pre-session."}
     
     # If neither, still return OK but note that it wasn't saved
@@ -3472,6 +3894,7 @@ async def record_timeout(data: TimeoutRecordRequest, db_session: Session = Depen
         session_record.session_status = "timeout"
         session_record.last_updated = datetime.utcnow()
         calculate_and_save_study_time(session_record)
+        mark_final_response_not_collected(session_record, data.timeout_screen)
 
         # Decrement role counter since they didn't complete
         decrement_role_counter(session_record, db_session)
@@ -3531,10 +3954,29 @@ async def submit_final_comment(data: FinalCommentRequest, db_session: Session = 
     sanitized_comment = html.escape(str(data.comment))
     session_record.final_user_comment = sanitized_comment
 
-    # NEW: Save witness binary choice if provided
-    if data.binary_choice:
-        session_record.final_binary_choice = data.binary_choice
-        print(f"Witness binary choice saved: {data.binary_choice}")
+    if data.input_provenance_summary:
+        try:
+            ui_events = json.loads(session_record.ui_event_log or "[]")
+            ui_events.append({
+                "event": "feedback_input_provenance",
+                "timestamp": datetime.utcnow().isoformat(),
+                "metadata": data.input_provenance_summary
+            })
+            session_record.ui_event_log = json.dumps(ui_events)
+            update_suspicious_behavior_summary(session_record, ui_events)
+        except Exception as e:
+            print(f"Could not append feedback input provenance: {e}")
+
+    # Witnesses answer whether they believe their partner was human or AI. Keep
+    # this separate from interrogator final judgments.
+    if data.binary_choice and session_record.role == "witness":
+        set_witness_final_response(
+            session_record,
+            data.binary_choice,
+            data.binary_choice_time_ms,
+            data.final_response_reason or "witness_feedback_submission"
+        )
+        print(f"Witness final partner belief saved: {data.binary_choice}")
 
     db_session.commit()
     print(f"Final comment added to session {data.session_id}.")
