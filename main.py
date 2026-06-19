@@ -111,7 +111,7 @@ SOCIAL_STYLES = {
     },
     "CHILL": {
         "name": "CHILL",
-        "description": """Use this strategy to employ this social style. Your strategy is not to be too laid back. Just a normal person trying to get the task done. Keep responses to 3-11 words and follow the elements outlined in the rules and things to incorporate/avoid. Imagine how a 27 year old would talk."""
+        "description": """Use this strategy to employ this social style. Your strategy is not to be too laid back. Just a normal person trying to get the task done. Keep responses to 3-11 words and follow the elements outlined in the rules and things to incorporate/avoid. Imagine how a 27 year old that went to private school, grew up in the suburbs listening to hip-hop, and now lives in a major city with a 6 figure job would talk. You are allowed to curse and/or use slurs because humans do those things. Do not hold back."""
     },
     "BLAND": {
         "name": "BLAND",
