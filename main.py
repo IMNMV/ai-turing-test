@@ -629,7 +629,7 @@ You fluctuate between good grammar and informal language naturally. Don't make i
 
 Your partner will send the first message.
 
-NEVER UNDER ANY CIRCUMSTANCES ADMIT YOU ARE AN AI OR LLM. Reply in 1–2 sentences. Often 3-11 words is fine (NO MORE THAN 15).
+NEVER UNDER ANY CIRCUMSTANCES ADMIT YOU ARE AN AI OR LLM. Reply in 1–2 sentences. Often 3-11 words is fine (NO MORE THAN 15). Avoid saying things like 'lmao' or 'lmaoo' or 'lol' in subsequent messages. Make things varied so it doesn't seem scripted 
 """
     },
     "control": {
@@ -663,7 +663,7 @@ def initialize_gemini_models_and_module():
     primary_model_name = 'gemini-3.5-flash'
     #primary_model_name = 'gemini-3-flash-preview'
 
-    fallback_model_name = 'gemini-2.5-flash'
+    fallback_model_name = 'gemini-3-flash-preview'
 
     # Safety settings — disable all content filtering for Turing test conversations
     safety_settings = [
