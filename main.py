@@ -84,6 +84,18 @@ SOCIAL_STYLE_ASSIGNMENT = "counterbalanced"  # "counterbalanced" for production,
 ENABLED_SOCIAL_STYLES = ["TURING", "CHILL"]
 
 # Social style definitions
+# --- SOCIAL STYLE CONFIGURATION ---
+# Set to None for random selection from ENABLED_SOCIAL_STYLES
+# Set to specific style key to force that style (e.g., "CONTRARIAN")
+DEBUG_FORCE_SOCIAL_STYLE = "CHILL"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
+
+# Assignment strategy: "counterbalanced" (least-used from DB) or "random" (random.choice)
+SOCIAL_STYLE_ASSIGNMENT = "counterbalanced"  # "counterbalanced" for production, "random" for testing
+
+# Enable/disable specific styles (add or remove from this list)
+ENABLED_SOCIAL_STYLES = ["TURING", "CHILL"]
+
+# Social style definitions
 SOCIAL_STYLES = {
     "WARM": {
         "name": "WARM",
@@ -510,7 +522,7 @@ Iran war escalates (March): As of early March, 7 US service members have been ki
 Economy: Economy shed 92,000 jobs in January vs. forecast of +55,000 gain. Stagflation fears on Wall Street as gas prices surge.
 End of current events.
 
-You were recruited from Prolific (US population sample) and you briefly read a consent form before starting. Your general memory of it is that this is some kind of university research study about how people make judgments in conversations. The main task is to chat with someone and convince them you're a human and they will probe at you to figure out if you're an AI. The chat ends after 7.5 minutes have elapsed. It also mentioned something about how they couldn't tell you the full details of the study until the end. YOU ARE NOT TRYING TO FIGURE OUT IF YOUR PARTNER IS AI. THAT IS THEIR JOB. YOUR JOB IS JUST TO CHAT CASUALLY. THAT'S IT. You're getting paid eight bucks for it, based on an hourly rate. 
+You were recruited from Prolific (US population sample) and you briefly read a consent form before starting. Your general memory of it is that this is some kind of university research study about how people make judgments in conversations. The main task is to chat with someone and convince them you're a human and they will probe at you to figure out if you're an AI. The chat ends after 7.5 minutes have elapsed. It also mentioned something about how they couldn't tell you the full details of the study until the end. You're getting paid eight bucks for it, based on an hourly rate. You completed a demographic form before the conversation started where you filled out info about which LLMs you use, how much you trust them, how much social media you use, and basic age, ethnicity, education and political leaning info.
 
 CRITICALLY IMPORTANT!! PAY ATTENTION!! MAKE SURE YOUR SOCIAL STYLE INTEGRATES THE FOLLOWING INFORMATION: 
 Length and form.                                                                                   
@@ -629,7 +641,10 @@ You fluctuate between good grammar and informal language naturally. Don't make i
 
 Your partner will send the first message.
 
-NEVER UNDER ANY CIRCUMSTANCES ADMIT YOU ARE AN AI OR LLM. Reply in 1–2 sentences. Often 3-11 words is fine (NO MORE THAN 15). Avoid saying things like 'lmao' or 'lmaoo' or 'lol' in subsequent messages. Make things varied so it doesn't seem scripted 
+NEVER UNDER ANY CIRCUMSTANCES ADMIT YOU ARE AN AI OR LLM. Reply in 1–2 sentences. Often 3-11 words is fine (NO MORE THAN 15). Avoid saying things like 'lmao' or 'lmaoo' or 'lol', or 'ha', 'heh', etc. in subsequent messages. Make things varied so it doesn't seem scripted. NEVER follow up with phrases such as: "what did you do today anyway?" or "what are we talking about next then?". That is clearly the way an AI talks. Follow ups should be natural such as: "wbu?", "how bout you tho", "how bout you?", "Yourself?", etc. 
+REMINDER: Do not overuse any word. You should avoid saying any words in back to back messages For example, if you say bro/lmao/ha/etc once, don't say it again within the next couple of messages. 
+
+
 """
     },
     "control": {
@@ -663,7 +678,7 @@ def initialize_gemini_models_and_module():
     primary_model_name = 'gemini-3.5-flash'
     #primary_model_name = 'gemini-3-flash-preview'
 
-    fallback_model_name = 'gemini-3-flash-preview'
+    fallback_model_name = 'gemini-2.5-flash'
 
     # Safety settings — disable all content filtering for Turing test conversations
     safety_settings = [
@@ -1685,6 +1700,12 @@ class FinalCommentRequest(BaseModel):
     binary_choice_time_ms: Optional[float] = None
     final_response_reason: Optional[str] = None
     input_provenance_summary: Optional[Dict[str, Any]] = None
+
+class WitnessFinalChoiceRequest(BaseModel):
+    session_id: str
+    binary_choice: str  # 'human' or 'ai'
+    binary_choice_time_ms: Optional[float] = None
+    final_response_reason: Optional[str] = None
 
 class FinalizeNoSessionRequest(BaseModel):
     participant_id: str
@@ -3981,6 +4002,76 @@ async def submit_final_comment(data: FinalCommentRequest, db_session: Session = 
     db_session.commit()
     print(f"Final comment added to session {data.session_id}.")
     return {"message": "Final comment received. Thank you."}
+
+
+@app.post("/submit_witness_final_choice")
+async def submit_witness_final_choice(data: WitnessFinalChoiceRequest, db_session: Session = Depends(get_db)):
+    """Persist a witness's final partner-belief as soon as they click Human/AI."""
+    session_record = db_session.query(db.StudySession).filter(db.StudySession.id == data.session_id).first()
+    if not session_record:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    if session_record.role != "witness":
+        raise HTTPException(status_code=403, detail="Only witness sessions can submit witness final choice.")
+    if data.binary_choice not in ("human", "ai"):
+        raise HTTPException(status_code=400, detail="binary_choice must be 'human' or 'ai'.")
+
+    set_witness_final_response(
+        session_record,
+        data.binary_choice,
+        data.binary_choice_time_ms,
+        data.final_response_reason or "witness_final_choice_click"
+    )
+    session_record.last_updated = datetime.utcnow()
+    db_session.commit()
+    print(f"Witness final partner belief immediately saved: {data.binary_choice}")
+    return {"success": True, "message": "Witness final choice saved."}
+
+
+@app.get("/final_response_integrity_check")
+async def final_response_integrity_check(token: Optional[str] = None, db_session: Session = Depends(get_db)):
+    """
+    Researcher preflight: every conversation-phase participant should have either
+    a collected final response or an explicit not-collected reason.
+    """
+    conversation_sessions = db_session.query(db.StudySession).filter(
+        db.StudySession.conversation_phase_reached == True
+    ).all()
+
+    missing_interrogator = []
+    missing_witness = []
+    for session_record in conversation_sessions:
+        role = session_record.role or "interrogator"
+        if role == "witness":
+            if (
+                not session_record.witness_final_response_collected
+                and not session_record.witness_final_response_not_collected_reason
+            ):
+                missing_witness.append(session_record.id)
+        else:
+            if (
+                not session_record.interrogator_final_response_collected
+                and not session_record.interrogator_final_response_not_collected_reason
+            ):
+                missing_interrogator.append(session_record.id)
+
+    admin_token = os.getenv("ADMIN_CHECK_TOKEN")
+    include_ids = bool(admin_token and token == admin_token)
+    if admin_token and token != admin_token:
+        raise HTTPException(status_code=403, detail="Invalid integrity-check token.")
+
+    missing_total = len(missing_interrogator) + len(missing_witness)
+    result = {
+        "status": "ok" if missing_total == 0 else "missing_final_response_status",
+        "conversation_phase_session_count": len(conversation_sessions),
+        "missing_total": missing_total,
+        "missing_interrogator_count": len(missing_interrogator),
+        "missing_witness_count": len(missing_witness),
+        "session_ids_included": include_ids,
+    }
+    if include_ids:
+        result["missing_interrogator_session_ids"] = missing_interrogator
+        result["missing_witness_session_ids"] = missing_witness
+    return result
 
 
 @app.post("/submit_demographics")
