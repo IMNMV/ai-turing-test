@@ -87,7 +87,7 @@ ENABLED_SOCIAL_STYLES = ["TURING", "CHILL"]
 # --- SOCIAL STYLE CONFIGURATION ---
 # Set to None for random selection from ENABLED_SOCIAL_STYLES
 # Set to specific style key to force that style (e.g., "CONTRARIAN")
-DEBUG_FORCE_SOCIAL_STYLE = "CHILL"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
+DEBUG_FORCE_SOCIAL_STYLE = "TURING"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
 
 # Assignment strategy: "counterbalanced" (least-used from DB) or "random" (random.choice)
 SOCIAL_STYLE_ASSIGNMENT = "counterbalanced"  # "counterbalanced" for production, "random" for testing
