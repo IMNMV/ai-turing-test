@@ -32,6 +32,11 @@ if not API_KEY:
     print("WARNING: GEMINI_API_KEY environment variable not set!")
 #TYPING_GIF_FILENAME = "typing_indicator.gif"
 
+# --- Gemini thinking level (swappable) ---
+# Applied to tactic selection + the primary response model. Gemini 3 Flash supports
+# "minimal", "low", "medium", "high". Change this one value to swap while testing.
+GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "medium")
+
 # --- NEW Response Timing Configuration (from the paper) ---
 RESPONSE_DELAY_MIN_BASE_SECONDS = 1.5  # The '1' in the formula
 RESPONSE_DELAY_PER_CHAR_MEAN = 0.1    # Paper uses 0.3, but that feels very long for typing. Let's start with 0.03-0.05. Let's use 0.03 for now.
@@ -221,6 +226,10 @@ def update_session_after_message(session_data, db_session: Session):
     try:
         session_record = db_session.query(db.StudySession).filter(db.StudySession.id == session_data["session_id"]).first()
         if session_record:
+            # Robustness: any saved turn means the conversation phase was reached, even if
+            # /log_conversation_start never landed. This keeps not-collected tracking alive.
+            if session_data.get("conversation_log"):
+                mark_conversation_phase_reached(session_record)
             session_record.conversation_log = json.dumps(session_data["conversation_log"])
             session_record.tactic_selection_log = json.dumps(session_data["tactic_selection_log"])
             session_record.ai_researcher_notes = json.dumps(session_data["ai_researcher_notes_log"])
@@ -229,10 +238,17 @@ def update_session_after_message(session_data, db_session: Session):
             update_suspicious_behavior_summary(session_record, session_data.get("ui_event_log", []))
             session_record.last_updated = datetime.utcnow()
             db_session.commit()
-            print(f"Session updated after message for {session_data['session_id']}, turn {session_data['turn_count']}")
+            # Read-after-write confirmation so Railway logs visibly show the turn persisted.
+            turns_in_db = 0
+            try:
+                turns_in_db = len(json.loads(session_record.conversation_log)) if session_record.conversation_log else 0
+            except Exception:
+                turns_in_db = -1
+            print(f"💾✅ TURN SAVED | session {session_data['session_id'][:8]}... | "
+                  f"turn {session_data.get('turn_count','?')} | conversation turns in DB: {turns_in_db}")
             return True
     except Exception as e:
-        print(f"Error updating session after message: {e}")
+        print(f"💾🛑❌ TURN SAVE FAILED | session {session_data.get('session_id','?')[:8]}... | {e}")
         db_session.rollback()
         return False
 
@@ -297,12 +313,123 @@ def update_session_after_rating(session_data, db_session: Session, is_final=Fals
             
             session_record.last_updated = datetime.utcnow()
             db_session.commit()
-            print(f"Session updated after rating for {session_data['session_id']}, final={is_final}")
+
+            # --- Read-after-write confirmation that this rating actually persisted ---
+            # Re-read the row from the DB (not the in-memory ORM object) so the log
+            # reflects what is truly stored, not just what we attempted to write.
+            db_session.refresh(session_record)
+            ratings_in_memory = session_data.get("intermediate_ddm_confidence_ratings", []) or []
+            try:
+                ratings_in_db = json.loads(session_record.interrogator_turn_judgment_log) if session_record.interrogator_turn_judgment_log else []
+            except Exception:
+                ratings_in_db = []
+            latest = ratings_in_memory[-1] if ratings_in_memory else {}
+
+            if len(ratings_in_db) >= len(ratings_in_memory) and len(ratings_in_memory) > 0:
+                print(f"⭐💾✅ RATING SAVED & VERIFIED | session {session_data['session_id'][:8]}... | "
+                      f"turn {latest.get('turn','?')} | choice={latest.get('binary_choice','?')} "
+                      f"conf={latest.get('confidence_percent', latest.get('confidence','?'))}% | "
+                      f"ratings persisted in DB: {len(ratings_in_db)} | final={is_final}")
+            else:
+                print(f"🛑❌ RATING SAVE MISMATCH | session {session_data['session_id'][:8]}... | "
+                      f"in-memory ratings={len(ratings_in_memory)} but DB has {len(ratings_in_db)} "
+                      f"— POSSIBLE DATA LOSS, INVESTIGATE | final={is_final}")
+
+            # On the final rating, print the big end-of-conversation integrity banner.
+            if is_final:
+                log_data_integrity_banner(session_record, db_session, context="interrogator_final_rating")
             return True
     except Exception as e:
-        print(f"Error updating session after rating: {e}")
+        print(f"🛑❌ RATING SAVE FAILED | session {session_data.get('session_id','?')[:8]}... | final={is_final} | {e}")
         db_session.rollback()
         return False
+
+
+def log_data_integrity_banner(session_record, db_session: Session, context: str = "conversation_end", do_refresh: bool = True):
+    """Print a large, bright Railway banner confirming whether a finished session's
+    critical data is fully saved. By default re-reads from the DB (read-after-write) so the
+    banner reflects committed state — pass do_refresh=False when called mid-transaction
+    (before commit) so pending in-memory values are shown instead of being reverted.
+    Role-aware: interrogators need a final binary+confidence judgment; witnesses need a
+    final partner belief."""
+    if do_refresh:
+        try:
+            db_session.refresh(session_record)
+        except Exception:
+            pass
+
+    sid = (session_record.id or "?")[:8]
+    role = session_record.role or "interrogator"
+    mode = session_record.study_mode or "?"
+
+    try:
+        turns = len(json.loads(session_record.conversation_log)) if session_record.conversation_log else 0
+    except Exception:
+        turns = -1
+    try:
+        per_turn_ratings = len(json.loads(session_record.interrogator_turn_judgment_log)) if session_record.interrogator_turn_judgment_log else 0
+    except Exception:
+        per_turn_ratings = -1
+
+    if role == "witness":
+        belief = session_record.witness_final_partner_belief
+        collected = bool(session_record.witness_final_response_collected)
+        checks = [
+            ("final partner belief", bool(belief), belief),
+            ("witness_final_response_collected", collected, collected),
+        ]
+        final_summary = f"belief={belief}"
+    else:
+        final_choice = session_record.interrogator_final_binary_choice
+        final_conf = session_record.interrogator_final_confidence_percent
+        collected = bool(session_record.interrogator_final_response_collected)
+        checks = [
+            ("final binary choice", bool(final_choice), final_choice),
+            ("final confidence %", final_conf is not None, final_conf),
+            ("interrogator_final_response_collected", collected, collected),
+            (">=1 per-turn rating", per_turn_ratings >= 1, per_turn_ratings),
+        ]
+        final_summary = f"choice={final_choice} conf={final_conf}%"
+
+    status_ok = (session_record.session_status == "completed")
+    all_ok = all(ok for _, ok, _ in checks)
+
+    if all_ok and status_ok:
+        head = "🎉🟢✅ STUDY DATA COMPLETE — ALL CRITICAL FIELDS SAVED ✅🟢🎉"
+    else:
+        head = "🚨🔴❌ STUDY DATA INCOMPLETE — MISSING FINAL DATA ❌🔴🚨"
+
+    lines = [
+        "",
+        "╔══════════════════════════════════════════════════════════════╗",
+        f"  {head}",
+        "╠══════════════════════════════════════════════════════════════╣",
+        f"  session {sid}... | role={role} | mode={mode} | context={context}",
+        f"  session_status={session_record.session_status}  (need 'completed': {'✅' if status_ok else '❌'})",
+        f"  conversation turns saved: {turns} | per-turn ratings saved: {per_turn_ratings}",
+        f"  final judgment: {final_summary}",
+        "  ── field-by-field ──",
+    ]
+    for name, ok, val in checks:
+        lines.append(f"     {'✅' if ok else '❌'} {name}: {val}")
+    lines.append("╚══════════════════════════════════════════════════════════════╝")
+    lines.append("")
+    print("\n".join(lines))
+
+
+def log_incomplete_final_banner_if_conversation_phase(session_record, db_session: Session, reason: str):
+    """If a session reached the conversation phase but is ending WITHOUT a collected final
+    judgment, emit the red incomplete banner so the loss is visible/labeled in Railway
+    instead of silent. Called mid-transaction (before commit), so do_refresh=False.
+    No-op for pre-conversation sessions and for sessions whose final response was collected."""
+    if not session_record or not getattr(session_record, "conversation_phase_reached", False):
+        return
+    role = session_record.role or "interrogator"
+    collected = (session_record.witness_final_response_collected if role == "witness"
+                 else session_record.interrogator_final_response_collected)
+    if collected:
+        return  # final judgment already captured — nothing lost, no alarm needed
+    log_data_integrity_banner(session_record, db_session, context=f"incomplete:{reason}", do_refresh=False)
 
 def flag_session_as_recovered(session_id: str, db_session: Session):
     """Flag that a session was recovered from a Railway restart"""
@@ -324,18 +451,43 @@ sessions: Dict[str, Dict[str, Any]] = {}
 # Store UI events before a session is initialized, keyed by participant_id
 pre_session_events: Dict[str, List[Dict[str, Any]]] = {}
 
+# H1 (Option A): how long after a server restart a participant can still resume.
+# On restart, in-progress sessions are marked 'interrupted'; if the participant comes
+# back within this window, treat the session as resumable instead of dropping them.
+SESSION_RESUME_WINDOW_MINUTES = 5
+
 # --- NEW: Session Recovery Function ---
 def recover_session_from_database(session_id: str, db_session: Session):
-    """Recover an active session from database if Railway restarted"""
+    """Recover an active (or recently-interrupted) session from the database after a restart."""
     try:
         session_record = db_session.query(db.StudySession).filter(
-            db.StudySession.id == session_id,
-            db.StudySession.session_status == "active"
+            db.StudySession.id == session_id
         ).first()
-        
+
         if not session_record:
             return None
-            
+
+        # H1 (Option A): normally only 'active' sessions are recoverable. A Railway restart
+        # marks in-progress sessions 'interrupted' on startup, which would otherwise make them
+        # permanently unrecoverable. If the participant returns within the resume window, flip
+        # a recently-interrupted session back to active and let them continue.
+        if session_record.session_status == "active":
+            pass
+        elif (session_record.session_status == "interrupted"
+              and session_record.last_updated is not None
+              and (datetime.utcnow() - session_record.last_updated) <= timedelta(minutes=SESSION_RESUME_WINDOW_MINUTES)):
+            session_record.session_status = "active"
+            session_record.recovered_from_restart = True
+            session_record.last_updated = datetime.utcnow()
+            try:
+                db_session.commit()
+            except Exception:
+                db_session.rollback()
+            print(f"♻️✅ RESUMED recently-interrupted session {session_id[:8]}... "
+                  f"(returned within {SESSION_RESUME_WINDOW_MINUTES} min of restart)")
+        else:
+            return None
+
         # Reconstruct the in-memory session from database
         recovered_session = {
             "session_id": session_record.id,
@@ -699,11 +851,12 @@ def initialize_gemini_models_and_module():
         types.SafetySetting(category="HARM_CATEGORY_CIVIC_INTEGRITY", threshold="BLOCK_NONE"),
     ]
 
-    # Create config with MINIMAL thinking level for Gemini 3 Flash (using string value)
-    # Note: Gemini 3 Flash supports all four levels: "minimal", "low", "medium", "high"
+    # Thinking level for Gemini 3 Flash. Driven by the top-level GEMINI_THINKING_LEVEL
+    # constant so it is swappable in one place (supports "minimal", "low", "medium", "high").
+    print(f"Gemini thinking level: {GEMINI_THINKING_LEVEL}")
     minimal_thinking_config = types.GenerateContentConfig(
         thinking_config=types.ThinkingConfig(
-            thinking_level="medium"  # Use string value (SDK v1.51.0+)
+            thinking_level=GEMINI_THINKING_LEVEL  # Use string value (SDK v1.51.0+)
         ),
         safety_settings=safety_settings
     )
@@ -743,11 +896,11 @@ def initialize_gemini_models_and_module():
     primary_model_name = 'gemini-3-flash-preview'
     fallback_model_name = 'gemini-2.5-flash'
 
-    # Create config with MINIMAL thinking level for Gemini 3 Flash (using string value)
-    # Note: Gemini 3 Flash supports all four levels: "minimal", "low", "medium", "high"
+    # Thinking level driven by the top-level GEMINI_THINKING_LEVEL constant (kept in sync
+    # with the active Harvard config above). Supports "minimal", "low", "medium", "high".
     minimal_thinking_config = types.GenerateContentConfig(
         thinking_config=types.ThinkingConfig(
-            thinking_level="minimal"  # Use string value (SDK v1.51.0+)
+            thinking_level=GEMINI_THINKING_LEVEL  # Use string value (SDK v1.51.0+)
         )
     )
 
@@ -1089,6 +1242,11 @@ def mark_interrupted_sessions_on_startup():
                 session.session_status = "interrupted"
                 session.last_updated = datetime.utcnow()
                 calculate_and_save_study_time(session)
+                # If this session was in the conversation phase without a collected final
+                # judgment, record WHY it's missing and flag it loudly (this is the dominant
+                # historical loss path — sessions stuck 'active' then swept by a restart).
+                mark_final_response_not_collected(session, "server_restart_interrupted")
+                log_incomplete_final_banner_if_conversation_phase(session, db_session, "server_restart_interrupted")
                 # Decrement counter - these participants are gone
                 decrement_role_counter(session, db_session)
 
@@ -1241,13 +1399,8 @@ JUSTIFICATION: [Why this fits the person's mental state and the current moment i
         except Exception as e:
             if is_retryable_error(e):
                 if attempt < max_retries:
-                    # Exponential backoff with jitter
-                    base_delay = 2 ** (attempt - 1) * 0.5
-                    jitter = random.uniform(0, base_delay)
-                    backoff_time = base_delay + jitter
-
-                    print(f"Retryable error in tactic selection (attempt {attempt}/{max_retries}), retrying in {backoff_time:.2f}s: {str(e)[:200]}")
-                    await asyncio.sleep(backoff_time)
+                    # Immediate retry, no backoff (kept intentionally fast for the timed study).
+                    print(f"Retryable error in tactic selection (attempt {attempt}/{max_retries}), retrying immediately: {str(e)[:200]}")
                     continue
                 else:
                     print(f"Retryable error in tactic selection after {max_retries} attempts, using fallback")
@@ -1422,15 +1575,9 @@ In your RESEARCHER_NOTES, include:
             except Exception as e:
                 if is_retryable_error(e):
                     if attempt < max_retries:
-                        # Exponential backoff with jitter: 0.5-1s, 1-2s, 2-4s
-                        base_delay = 2 ** (attempt - 1) * 0.5
-                        jitter = random.uniform(0, base_delay)
-                        backoff_time = base_delay + jitter
-
-                        print(f"Retryable error in primary model AI response (attempt {attempt}/{max_retries}), retrying in {backoff_time:.2f}s: {str(e)[:200]}")
+                        # Immediate retry, no backoff (kept fast for the timed study).
+                        print(f"Retryable error in primary model AI response (attempt {attempt}/{max_retries}), retrying immediately: {str(e)[:200]}")
                         primary_retry_attempts += 1
-                        primary_retry_time += backoff_time
-                        await asyncio.sleep(backoff_time)
                         continue
                     else:
                         # All retries exhausted on primary, will try fallback
@@ -1506,15 +1653,9 @@ In your RESEARCHER_NOTES, include:
             except Exception as e_fb:
                 if is_retryable_error(e_fb):
                     if attempt_fallback < max_retries:
-                        # Exponential backoff with jitter
-                        base_delay = 2 ** (attempt_fallback - 1) * 0.5
-                        jitter = random.uniform(0, base_delay)
-                        backoff_time = base_delay + jitter
-
-                        print(f"Retryable error in fallback model AI response (attempt {attempt_fallback}/{max_retries}), retrying in {backoff_time:.2f}s: {str(e_fb)[:200]}")
+                        # Immediate retry, no backoff (kept fast for the timed study).
+                        print(f"Retryable error in fallback model AI response (attempt {attempt_fallback}/{max_retries}), retrying immediately: {str(e_fb)[:200]}")
                         fallback_retry_attempts += 1
-                        fallback_retry_time += backoff_time
-                        await asyncio.sleep(backoff_time)
                         continue
                     else:
                         # All retries exhausted on fallback too
@@ -1713,6 +1854,12 @@ class FinalCommentRequest(BaseModel):
     input_provenance_summary: Optional[Dict[str, Any]] = None
 
 class WitnessFinalChoiceRequest(BaseModel):
+    session_id: str
+    binary_choice: str  # 'human' or 'ai'
+    binary_choice_time_ms: Optional[float] = None
+    final_response_reason: Optional[str] = None
+
+class InterrogatorFinalChoiceRequest(BaseModel):
     session_id: str
     binary_choice: str  # 'human' or 'ai'
     binary_choice_time_ms: Optional[float] = None
@@ -3079,6 +3226,7 @@ async def report_abandonment(request: Request, db_session: Session = Depends(get
             session_record.last_updated = datetime.utcnow()
             calculate_and_save_study_time(session_record)
             mark_final_response_not_collected(session_record, reason)
+            log_incomplete_final_banner_if_conversation_phase(session_record, db_session, f"abandonment_{reason}")
 
             # Decrement role counter so next participant gets the correct role
             decrement_role_counter(session_record, db_session)
@@ -3695,6 +3843,37 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
             flag_session_as_recovered(session_id, db_session)
             print(f"Session {session_id} recovered from database for rating and flagged")
         else:
+            # C7: idempotent finalize. The in-memory session is deleted once a final rating
+            # completes a session, so a retried or beaconed FINAL rating would otherwise 404
+            # even though the data is valuable. If the DB record exists and this is a final
+            # response, apply the judgment idempotently instead of dropping it.
+            existing = db_session.query(db.StudySession).filter(db.StudySession.id == session_id).first()
+            if existing and (data.is_final_response or data.final_response_reason):
+                if existing.role == "witness":
+                    raise HTTPException(status_code=403, detail="Witnesses cannot submit interrogator ratings.")
+                cp = data.confidence_percent
+                if cp is None:
+                    cp = int(round((data.confidence or 0) * 100))
+                set_interrogator_final_response(
+                    existing,
+                    data.binary_choice,
+                    cp,
+                    data.decision_time_seconds,
+                    data.final_response_reason or "time_expired"
+                )
+                if existing.session_status != "completed":
+                    existing.session_status = "completed"
+                existing.last_updated = datetime.utcnow()
+                db_session.commit()
+                print(f"♻️✅ IDEMPOTENT FINAL RATING re-applied to already-finalized session {session_id[:8]}... "
+                      f"| choice={data.binary_choice} conf={cp}%")
+                log_data_integrity_banner(existing, db_session, context="idempotent_final_resubmit")
+                return {
+                    "message": "Final rating recorded (idempotent).",
+                    "study_over": True,
+                    "ai_detected": existing.ai_detected_final,
+                    "session_data_summary": None
+                }
             raise HTTPException(status_code=404, detail="Session not found")
 
     session = sessions[session_id]
@@ -3927,6 +4106,7 @@ async def record_timeout(data: TimeoutRecordRequest, db_session: Session = Depen
         session_record.last_updated = datetime.utcnow()
         calculate_and_save_study_time(session_record)
         mark_final_response_not_collected(session_record, data.timeout_screen)
+        log_incomplete_final_banner_if_conversation_phase(session_record, db_session, f"timeout_{data.timeout_screen}")
 
         # Decrement role counter since they didn't complete
         decrement_role_counter(session_record, db_session)
@@ -4034,8 +4214,38 @@ async def submit_witness_final_choice(data: WitnessFinalChoiceRequest, db_sessio
     )
     session_record.last_updated = datetime.utcnow()
     db_session.commit()
-    print(f"Witness final partner belief immediately saved: {data.binary_choice}")
+    print(f"⭐💾✅ WITNESS FINAL BELIEF SAVED & VERIFIED | session {data.session_id[:8]}... | belief={data.binary_choice}")
+    log_data_integrity_banner(session_record, db_session, context="witness_final_choice")
     return {"success": True, "message": "Witness final choice saved."}
+
+
+@app.post("/submit_interrogator_final_choice")
+async def submit_interrogator_final_choice(data: InterrogatorFinalChoiceRequest, db_session: Session = Depends(get_db)):
+    """Persist the interrogator's FINAL binary direction (human/AI) the instant they click it,
+    BEFORE the confidence slider. This guarantees the hardest-to-replace datum survives even if
+    they bail on the slider / lose connection. Confidence + collected=True arrive later via
+    /submit_rating (is_final_response). Mirrors /submit_witness_final_choice."""
+    session_record = db_session.query(db.StudySession).filter(db.StudySession.id == data.session_id).first()
+    if not session_record:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    if session_record.role == "witness":
+        raise HTTPException(status_code=403, detail="Witness sessions use /submit_witness_final_choice.")
+    if data.binary_choice not in ("human", "ai"):
+        raise HTTPException(status_code=400, detail="binary_choice must be 'human' or 'ai'.")
+
+    # Save the direction immediately. Do NOT mark collected=True yet — confidence is still
+    # pending — but record the binary fields + legacy mirrors so nothing is lost if they stop here.
+    session_record.interrogator_final_binary_choice = data.binary_choice
+    session_record.final_binary_choice = data.binary_choice  # legacy compatibility mirror
+    session_record.ai_detected_final = (data.binary_choice == "ai")
+    session_record.interrogator_final_response_reason = (
+        data.final_response_reason or "binary_choice_saved_pending_confidence"
+    )
+    session_record.last_updated = datetime.utcnow()
+    db_session.commit()
+    print(f"⭐💾✅ INTERROGATOR FINAL BINARY SAVED (confidence pending) | "
+          f"session {data.session_id[:8]}... | choice={data.binary_choice}")
+    return {"success": True, "message": "Interrogator final binary choice saved (confidence pending)."}
 
 
 @app.get("/final_response_integrity_check")
