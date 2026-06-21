@@ -685,7 +685,7 @@ def initialize_gemini_models_and_module():
     primary_model_name = 'gemini-3.5-flash'
     #primary_model_name = 'gemini-3-flash-preview'
 
-    fallback_model_name = 'gemini-2.5-flash'
+    fallback_model_name = 'gemini-3-flash-preview'
 
     # Safety settings — disable all content filtering for Turing test conversations
     safety_settings = [
@@ -693,13 +693,14 @@ def initialize_gemini_models_and_module():
         types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
         types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
         types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
+        types.SafetySetting(category="HARM_CATEGORY_CIVIC_INTEGRITY", threshold="BLOCK_NONE"),
     ]
 
     # Create config with MINIMAL thinking level for Gemini 3 Flash (using string value)
     # Note: Gemini 3 Flash supports all four levels: "minimal", "low", "medium", "high"
     minimal_thinking_config = types.GenerateContentConfig(
         thinking_config=types.ThinkingConfig(
-            thinking_level="minimal"  # Use string value (SDK v1.51.0+)
+            thinking_level="medium"  # Use string value (SDK v1.51.0+)
         ),
         safety_settings=safety_settings
     )
