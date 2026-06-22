@@ -77,16 +77,6 @@ STUDY_MODE = os.getenv("STUDY_MODE", "HUMAN_WITNESS")  # Options: "AI_WITNESS" o
 MAX_TOTAL_WAITING_SECONDS = 240  # 4 minutes total cap
 # ---------------------------------
 
-# --- SOCIAL STYLE CONFIGURATION ---
-# Set to None for random selection from ENABLED_SOCIAL_STYLES
-# Set to specific style key to force that style (e.g., "CONTRARIAN")
-DEBUG_FORCE_SOCIAL_STYLE = "CHILL"  # None = randomize, or "WARM", "PLAYFUL", "DIRECT", "GUARDED", "CONTRARIAN", "ADAPTIVE", "HYBRID", "NEUTRAL"
-
-# Assignment strategy: "counterbalanced" (least-used from DB) or "random" (random.choice)
-SOCIAL_STYLE_ASSIGNMENT = "counterbalanced"  # "counterbalanced" for production, "random" for testing
-
-# Enable/disable specific styles (add or remove from this list)
-ENABLED_SOCIAL_STYLES = ["TURING", "CHILL"]
 
 # Social style definitions
 # --- SOCIAL STYLE CONFIGURATION ---
