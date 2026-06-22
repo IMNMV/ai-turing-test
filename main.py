@@ -175,7 +175,7 @@ app.add_middleware(
 # templates = Jinja2Templates(directory="interaction-study-main-2")
 
 # --- Database Imports ---
-from sqlalchemy import text
+from sqlalchemy import text, or_, and_
 from sqlalchemy.orm import Session
 import database as db
 
@@ -2124,10 +2124,20 @@ def cleanup_orphaned_sessions(db_session: Session):
         # 2. Clean up waiting sessions stuck for too long (>2 minutes)
         # These are likely from abandoned browsers or people who closed the tab
         # Skip sessions already marked as abandoned (report_abandonment already handled them)
+        # #2: also catch waiters with a NULL waiting_room_entered_at (an inconsistent ghost state that
+        # the plain "< now()-2min" comparison silently skips, so they linger for hours). Fall back to
+        # last_updated for the staleness check on those.
+        _stale_cutoff = datetime.utcnow() - timedelta(minutes=2)
         stale_waiting = db_session.query(db.StudySession).filter(
             db.StudySession.match_status == "waiting",
             db.StudySession.session_status != "abandoned",
-            db.StudySession.waiting_room_entered_at < datetime.utcnow() - timedelta(minutes=2)
+            or_(
+                db.StudySession.waiting_room_entered_at < _stale_cutoff,
+                and_(
+                    db.StudySession.waiting_room_entered_at.is_(None),
+                    db.StudySession.last_updated < _stale_cutoff,
+                ),
+            ),
         ).all()
 
         for session in stale_waiting:
@@ -3317,6 +3327,20 @@ async def report_partner_dropped(request: Request, db_session: Session = Depends
         session_record.match_status = 'partner_dropped'
         if session_id in sessions:
             sessions[session_id]['match_status'] = 'partner_dropped'
+
+        # #3: belt-and-suspenders for a SILENT drop (the dropped partner's own beforeunload beacon
+        # never fired, so report_abandonment never marked them). Record a not-collected REASON on the
+        # dropper so they aren't a silently-missing final. Deliberately non-destructive: it does NOT
+        # change their session/match status (a merely-slow partner on a false report is not killed),
+        # mark_final_response_not_collected is guarded against overwriting a completed final, and if the
+        # partner later submits their own final, set_*_final_response clears this reason.
+        if partner_id:
+            partner_record = db_session.query(db.StudySession).filter(
+                db.StudySession.id == partner_id
+            ).first()
+            if partner_record:
+                mark_final_response_not_collected(partner_record, "partner_reported_dropout_midconvo")
+
         db_session.commit()
 
         print(f"❌ Partner dropped MID-CONVERSATION: {session_id[:8]}... ({len(conv_log)} messages exchanged)")
