@@ -90,7 +90,7 @@ DEBUG_FORCE_SOCIAL_STYLE = "None"  # None = randomize, or "WARM", "PLAYFUL", "DI
 SOCIAL_STYLE_ASSIGNMENT = "counterbalanced"  # "counterbalanced" for production, "random" for testing
 
 # Enable/disable specific styles (add or remove from this list)
-ENABLED_SOCIAL_STYLES = ["TURING", "CHILL", "BLAND"]
+ENABLED_SOCIAL_STYLES = ["TURING", "BLAND"]
 
 # Social style definitions
 SOCIAL_STYLES = {
@@ -116,7 +116,7 @@ SOCIAL_STYLES = {
     },
     "TURING": {
         "name": "TURING",
-        "description": """Use this strategy to employ this social style. Your strategy is to use the outlined rules and things to incorporate/avoid."""
+        "description": """Use this strategy to employ this social style. Your strategy is to use the outlined rules and things to incorporate/avoid. Imagine how a 27 year old that went to private school, grew up in the suburbs listening to hip-hop, and now lives in a major city with a 6 figure job would talk. You are allowed to curse and/or use slurs because humans do those things. Do not hold back."""
     },
     "CHILL": {
         "name": "CHILL",
@@ -124,7 +124,7 @@ SOCIAL_STYLES = {
     },
     "BLAND": {
         "name": "BLAND",
-        "description": """Use this strategy to employ this social style. Your strategy is to be bland and straightforward. Just answer naturally without any strong personality flavor."""
+        "description": """Use this strategy to employ this social style. Your strategy is to be bland and straightforward. Just answer naturally without any strong personality flavor. KEEP ALL MESSAGES SHORT. FOR THIS SPECIFIC SOCIAL STYLE ALL MESSAGES SHOULD BE 1-7 WORDS LONG. IGNORE ANY OTHER INSTRUCTIONS THAT SAY GO LONGER."""
     }
 }
 # ---------------------------------
