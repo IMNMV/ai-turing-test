@@ -124,7 +124,7 @@ SOCIAL_STYLES = {
     },
     "BLAND": {
         "name": "BLAND",
-        "description": """Use this strategy to employ this social style. Your strategy is to be bland and straightforward. Just answer naturally without any strong personality flavor."""
+        "description": """Use this strategy to employ this social style. Your strategy is to be bland and straightforward. Just answer naturally without any strong personality flavor. Keep messages short around 1-7 words with the average being 6 words. THIS IS VERY IMPORTANT. Keep messages short around 1-7 words with the average being 6 words."""
     }
 }
 # ---------------------------------
