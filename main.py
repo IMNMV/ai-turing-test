@@ -38,13 +38,15 @@ if not API_KEY:
 GEMINI_THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "medium")
 
 # --- NEW Response Timing Configuration (from the paper) ---
-RESPONSE_DELAY_MIN_BASE_SECONDS = 1.5  # The '1' in the formula
-RESPONSE_DELAY_PER_CHAR_MEAN = 0.1    # Paper uses 0.3, but that feels very long for typing. Let's start with 0.03-0.05. Let's use 0.03 for now.
-RESPONSE_DELAY_PER_CHAR_STD = 0.005   # Std dev for per character delay
-RESPONSE_DELAY_PER_PREV_CHAR_MEAN = 0.015 # Paper uses 0.03, adjusted. For reading time.
-RESPONSE_DELAY_PER_PREV_CHAR_STD = 0.001 # Std dev for per previous character delay
-RESPONSE_DELAY_THINKING_SHAPE = 2.5   # Gamma distribution shape parameter (k)
-RESPONSE_DELAY_THINKING_SCALE = 0.4  # Gamma distribution scale parameter (theta) - thinking time
+# Paper response-delay model, AI witnesses ONLY:
+#   1 + N(0.3,0.03)*n_char + N(0.03,0.003)*n_char_prev + Gamma(2.5, 0.25)
+RESPONSE_DELAY_MIN_BASE_SECONDS = 1.0    # Paper: constant '1' (minimum 1s delay)
+RESPONSE_DELAY_PER_CHAR_MEAN = 0.3       # Paper: per char of THIS message (typing speed)
+RESPONSE_DELAY_PER_CHAR_STD = 0.03       # Paper std for per-char
+RESPONSE_DELAY_PER_PREV_CHAR_MEAN = 0.03 # Paper: per char of PREVIOUS message (reading time)
+RESPONSE_DELAY_PER_PREV_CHAR_STD = 0.003 # Paper std for per-prev-char
+RESPONSE_DELAY_THINKING_SHAPE = 2.5      # Paper: Gamma shape k (thinking time)
+RESPONSE_DELAY_THINKING_SCALE = 0.25     # Paper: Gamma scale theta
 
 # --- HUMAN MODE MESSAGE DELAY CONFIGURATION ---
 # Based on observed human typing delays from empirical data
@@ -3402,8 +3404,10 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
         partner = sessions[partner_session_id]
         current_turn = session["turn_count"] + 1
 
-        # Calculate artificial delivery delay from the same per-character
-        # formulation used for AI responses.
+        # Human witnesses are delivered on their ACTUAL typing time — NO artificial
+        # per-character delay. Matches the paper, which applies the response-delay
+        # formula to AI witnesses ONLY. The human's real typing time is already
+        # captured in message_composition_time_seconds.
         word_count = len(user_message.split())
         previous_message_char_count = 0
         if session.get("conversation_log"):
@@ -3411,15 +3415,12 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
             previous_message = previous_turn.get("user") or previous_turn.get("assistant") or ""
             previous_message_char_count = len(previous_message)
 
-        delay_components = calculate_per_character_response_delay(
-            len(user_message),
-            previous_message_char_count
-        )
-        delay_seconds = delay_components["total_delay_seconds"]
+        delay_components = None
+        delay_seconds = 0.0
 
-        # Calculate when this message should be delivered to partner
+        # Deliver immediately — the real typing time already elapsed before send.
         sent_time = datetime.utcnow().timestamp()
-        delivery_time = sent_time + delay_seconds
+        delivery_time = sent_time
 
         # Add message to both conversation logs
         turn_data = {
