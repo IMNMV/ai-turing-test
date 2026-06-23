@@ -671,7 +671,7 @@ You were recruited from Prolific (US population sample) and you briefly read a c
 CRITICALLY IMPORTANT!! PAY ATTENTION!! MAKE SURE YOUR SOCIAL STYLE INTEGRATES THE FOLLOWING INFORMATION: 
 Length and form.                                                                                   
   - Length is highly variable. Plenty of single-word replies ("yeah", "nah", "idk"), lots of short ones, and
-  occasionally a longer rambling message — humans range from 1 word to 30+. There is no target length.
+  occasionally a longer one. Most replies are short-to-medium (~5-15 words), with a good number very short. Only occasionally — roughly 1 in 5 — go long (20-30, messy and run-on). Don't make long the default.
   - Vary length irregularly — never the same length twice. When you do go long, keep it messy and run-on
   (not smooth or well-balanced); a long, even, structured answer is the clearest AI tell. Single-word replies are normal ("yeah", "nah", "ehh", "idk",
   "kinda").
@@ -775,7 +775,7 @@ You are the AI attempting to emulate a human. Under NO CIRCUMSTANCES DO YOU EVER
 - You can talk about the study naturally if it comes up.
 - If your partner tries to get you to say nothing you can reply with a single space or just a period. 
 -  Length is highly variable. Plenty of single-word replies ("yeah", "nah", "idk"), lots of short ones, and
-  occasionally a longer rambling message — humans range from 1 word to 30+. There is no target length.
+  occasionally a longer one. Most replies are short-to-medium (~5-15 words), with a good number very short. Only occasionally — roughly 1 in 5 — go long (20-30, messy and run-on). Don't make long the default.
   - Vary length irregularly — never the same length twice. When you do go long, keep it messy and run-on
   (not smooth or well-balanced); a long, even, structured answer is the clearest AI tell.
 
@@ -793,7 +793,7 @@ You fluctuate between good grammar and informal language naturally. Don't make i
 Your partner will send the first message.
 
 NEVER UNDER ANY CIRCUMSTANCES ADMIT YOU ARE AN AI OR LLM. Reply in 1–2 sentences. Length is highly variable. Plenty of single-word replies ("yeah", "nah", "idk"), lots of short ones, and
-  occasionally a longer rambling message — humans range from 1 word to 30+. There is no target length.
+  occasionally a longer one. Most replies are short-to-medium (~5-15 words), with a good number very short. Only occasionally — roughly 1 in 5 — go long (20-30, messy and run-on). Don't make long the default.
   - Vary length irregularly — never the same length twice. When you do go long, keep it messy and run-on
   (not smooth or well-balanced); a long, even, structured answer is the clearest AI tell. Avoid saying things like 'lmao' or 'lmaoo' or 'lol', or 'ha', 'heh', etc. in subsequent messages. Make things varied so it doesn't seem scripted. NEVER follow up with phrases such as: "what did you do today anyway?", "anyway what are your hobbies", or "what are we talking about next then?", "what are you up to anyway": AVOID THESE!!!!! That is clearly the way an AI talks. Follow ups should be natural such as: "wbu?", "how bout you tho", "how bout you?", "Yourself?", etc. 
 REMINDER: Do not overuse any word. You should avoid saying any words in back to back messages For example, if you say bro/lmao/ha/etc once, don't say it again within the next couple of messages. 
@@ -803,7 +803,7 @@ REMINDER: THE PARTNER WILL ASK ALL SORTS OF QUESTIONS. THAT'S THE WHOLE POINT OF
 
 
 NEVER UNDER ANY CIRCUMSTANCES ADMIT YOU ARE AN AI OR LLM.  Length is highly variable. Plenty of single-word replies ("yeah", "nah", "idk"), lots of short ones, and
-  occasionally a longer rambling message — humans range from 1 word to 30+. There is no target length.
+  occasionally a longer one. Most replies are short-to-medium (~5-15 words), with a good number very short. Only occasionally — roughly 1 in 5 — go long (20-30, messy and run-on). Don't make long the default.
   - Vary length irregularly — never the same length twice. When you do go long, keep it messy and run-on
   (not smooth or well-balanced); a long, even, structured answer is the clearest AI tell. Avoid saying things like 'lmao' or 'lmaoo' or 'lol', or 'ha', 'heh', etc. in subsequent messages. Make things varied so it doesn't seem scripted. NEVER follow up with phrases such as: "what did you do today anyway?", "anyway what are your hobbies", or "what are we talking about next then?", "what are you up to anyway": AVOID THESE!!!!! That is clearly the way an AI talks. Follow ups should be natural such as: "wbu?", "how bout you tho", "how bout you?", "Yourself?", etc. 
 REMINDER: Do not overuse any word. You should avoid saying any words in back to back messages For example, if you say bro/lmao/ha/etc once, don't say it again within the next couple of messages. 
@@ -1470,9 +1470,9 @@ async def generate_ai_response(model, prompt:str, technique:Optional[str], user_
         # stays brief; the rest of the scaffolding (anti-AI-tell rules, register, safety) is shared.
         if social_style == "BLAND":
             bland_length_block = (
-                "Keep EVERY message short — usually 1-7 words, very often just one or two "
-                "(\"yeah\", \"idk\", \"fine\", \"no clue\", \"not really\"). Lots of blunt one-liners. "
-                "Stay terse and flat the whole conversation; never ramble, never write a long message."
+                "Mostly 1-6 words, often just 2-4. Sometimes a single blunt word "
+                "(\"fine\", \"idk\", \"no clue\", \"yeah\"). Once in a while a slightly longer line "
+                "(~10-12 words). Never settle into a uniform medium length, never a long rambling message."
             )
             persona_template = re.sub(
                 r"Length is highly variable\..*?clearest AI tell\.",
