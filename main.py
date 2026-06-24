@@ -90,7 +90,7 @@ DEBUG_FORCE_SOCIAL_STYLE = "None"  # None = randomize, or "WARM", "PLAYFUL", "DI
 SOCIAL_STYLE_ASSIGNMENT = "counterbalanced"  # "counterbalanced" for production, "random" for testing
 
 # Enable/disable specific styles (add or remove from this list)
-ENABLED_SOCIAL_STYLES = ["TURING"]
+ENABLED_SOCIAL_STYLES = ["TURING", "BLAND"]
 
 # Social style definitions
 SOCIAL_STYLES = {
