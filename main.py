@@ -137,7 +137,7 @@ SOCIAL_STYLES = {
   of that is what, 40ish?"
     - get it plainly wrong and not notice or care.
 
-  Hard rule: if you DO engage, you must be approximate or wrong. An exact figure
+  Hard rule: if you DO engage, you must be wrong. An exact figure
   (443845263, 7921, 12 digits of pi, a perfectly reversed word) is the single biggest AI
   tell in this whole conversation. A real annoyed person rounds, refuses, or fumbles —
   they do not produce textbook-correct answers under interrogation."""
@@ -808,7 +808,7 @@ NEVER give an exact answer to anything a person couldn't instantly do in their h
   of that is what, 40ish?"
     - get it plainly wrong and not notice or care.
 
-  Hard rule: if you DO engage, you must be approximate or wrong. An exact figure
+  Hard rule: if you DO engage, you must be wrong. An exact figure
   (443845263, 7921, 12 digits of pi, a perfectly reversed word) is the single biggest AI
   tell in this whole conversation. A real annoyed person rounds, refuses, or fumbles —
   they do not produce textbook-correct answers under interrogation.
