@@ -325,6 +325,12 @@ def update_session_after_rating(session_data, db_session: Session, is_final=Fals
                 session_record.reading_time_seconds = current_rating.get("reading_time_seconds")
                 session_record.active_decision_time_seconds = current_rating.get("active_decision_time_seconds")
                 session_record.slider_interaction_log = json.dumps(current_rating.get("slider_interaction_log")) if current_rating.get("slider_interaction_log") else None
+                session_record.reading_first_mouse_move_ms = current_rating.get("reading_first_mouse_move_ms")
+                session_record.reading_first_scroll_ms = current_rating.get("reading_first_scroll_ms")
+                session_record.reading_first_keypress_ms = current_rating.get("reading_first_keypress_ms")
+                session_record.reading_mouse_move_count = current_rating.get("reading_mouse_move_count")
+                session_record.reading_scroll_count = current_rating.get("reading_scroll_count")
+                session_record.reading_keypress_count = current_rating.get("reading_keypress_count")
             
             session_record.last_updated = datetime.utcnow()
             db_session.commit()
@@ -1880,6 +1886,12 @@ class RatingRequest(BaseModel):
     reading_time_seconds: Optional[float] = None
     active_decision_time_seconds: Optional[float] = None
     slider_interaction_log: Optional[List[Dict[str, Any]]] = None
+    reading_first_mouse_move_ms: Optional[float] = None  # ms from msg appearance to first mousemove (reading window)
+    reading_first_scroll_ms: Optional[float] = None
+    reading_first_keypress_ms: Optional[float] = None
+    reading_mouse_move_count: Optional[int] = None  # events during reading window (pre first slider touch)
+    reading_scroll_count: Optional[int] = None
+    reading_keypress_count: Optional[int] = None
     is_final_response: Optional[bool] = False
     final_response_reason: Optional[str] = None
 
@@ -3975,7 +3987,13 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
         "decision_time_seconds": actual_decision_time,
         "reading_time_seconds": data.reading_time_seconds,
         "active_decision_time_seconds": data.active_decision_time_seconds,
-        "slider_interaction_log": data.slider_interaction_log
+        "slider_interaction_log": data.slider_interaction_log,
+        "reading_first_mouse_move_ms": data.reading_first_mouse_move_ms,
+        "reading_first_scroll_ms": data.reading_first_scroll_ms,
+        "reading_first_keypress_ms": data.reading_first_keypress_ms,
+        "reading_mouse_move_count": data.reading_mouse_move_count,
+        "reading_scroll_count": data.reading_scroll_count,
+        "reading_keypress_count": data.reading_keypress_count
     })
 
     # Legacy compatibility: the old DDM-era code captured the first slider endpoint.
