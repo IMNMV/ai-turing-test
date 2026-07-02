@@ -78,6 +78,14 @@ class StudySession(Base):
     reading_time_seconds = Column(Float, nullable=True)  # Time from AI response to first slider touch
     active_decision_time_seconds = Column(Float, nullable=True)  # Time from first slider touch to submit
     slider_interaction_log = Column(Text, nullable=True)  # JSON of all slider interactions per turn
+    # NEW: reading-phase engagement telemetry (latest turn; full history in the per-turn JSON log)
+    reading_first_mouse_move_ms = Column(Float, nullable=True)  # ms from AI msg appearance to first mousemove (reading window)
+    reading_first_scroll_ms = Column(Float, nullable=True)
+    reading_first_keypress_ms = Column(Float, nullable=True)
+    reading_mouse_move_count = Column(Integer, nullable=True)  # events before first slider touch
+    reading_scroll_count = Column(Integer, nullable=True)
+    reading_keypress_count = Column(Integer, nullable=True)
+    mouse_trajectory = Column(Text, nullable=True)  # JSON [[x,y,ms],...] latest turn; full history in per-turn log
     # NEW: Session status tracking for incremental saves
     session_status = Column(String, default="active", index=True)  # active, completed, interrupted - indexed for faster queries
     last_updated = Column(DateTime, default=datetime.utcnow, index=True)  # Track when session was last updated - indexed for queries
