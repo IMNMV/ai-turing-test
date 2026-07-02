@@ -331,6 +331,7 @@ def update_session_after_rating(session_data, db_session: Session, is_final=Fals
                 session_record.reading_mouse_move_count = current_rating.get("reading_mouse_move_count")
                 session_record.reading_scroll_count = current_rating.get("reading_scroll_count")
                 session_record.reading_keypress_count = current_rating.get("reading_keypress_count")
+                session_record.mouse_trajectory = json.dumps(current_rating.get("mouse_trajectory")) if current_rating.get("mouse_trajectory") else None
             
             session_record.last_updated = datetime.utcnow()
             db_session.commit()
@@ -1892,6 +1893,7 @@ class RatingRequest(BaseModel):
     reading_mouse_move_count: Optional[int] = None  # events during reading window (pre first slider touch)
     reading_scroll_count: Optional[int] = None
     reading_keypress_count: Optional[int] = None
+    mouse_trajectory: Optional[List[Any]] = None  # [[x,y,ms],...] sampled ~20Hz over the assessment phase
     is_final_response: Optional[bool] = False
     final_response_reason: Optional[str] = None
 
@@ -3993,7 +3995,8 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
         "reading_first_keypress_ms": data.reading_first_keypress_ms,
         "reading_mouse_move_count": data.reading_mouse_move_count,
         "reading_scroll_count": data.reading_scroll_count,
-        "reading_keypress_count": data.reading_keypress_count
+        "reading_keypress_count": data.reading_keypress_count,
+        "mouse_trajectory": data.mouse_trajectory
     })
 
     # Legacy compatibility: the old DDM-era code captured the first slider endpoint.
