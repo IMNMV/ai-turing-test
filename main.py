@@ -2273,7 +2273,7 @@ def run_periodic_cleanup():
 # Start cleanup thread when server starts
 cleanup_thread = threading.Thread(target=run_periodic_cleanup, daemon=True)
 cleanup_thread.start()
-print("🔧 Background cleanup thread started (runs every 5 minutes)")
+print("🔧 Background cleanup thread started (runs every 1 minute)")
 
 # --- API Endpoints ---
 
@@ -3470,6 +3470,25 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
 
     # NEW: Check if this is human-human conversation (HUMAN_WITNESS mode)
     partner_session_id = session.get('matched_session_id')
+
+    # In HUMAN_WITNESS mode we must NEVER fall through to AI generation — that would splice a
+    # Gemini reply into a human-condition transcript (silent human->bot switch). If the partner
+    # isn't in memory (e.g. after a redeploy), try to recover it from the DB; if it still can't
+    # be found, tell the frontend the partner is unavailable so it routes to the dropout flow.
+    if STUDY_MODE == "HUMAN_WITNESS":
+        if partner_session_id and partner_session_id not in sessions:
+            recovered_partner = recover_session_from_database(partner_session_id, db_session)
+            if recovered_partner:
+                sessions[partner_session_id] = recovered_partner
+                print(f"HH partner {partner_session_id[:8]}... recovered from DB for message routing")
+        if not partner_session_id or partner_session_id not in sessions:
+            print(f"⚠️ HH partner unavailable for {session_id[:8]}... (partner={str(partner_session_id)[:8] if partner_session_id else 'none'}) — returning partner_unavailable, NOT generating AI")
+            return {
+                "human_partner": True,
+                "partner_unavailable": True,
+                "message_routed": False,
+            }
+
     is_human_partner = (STUDY_MODE == "HUMAN_WITNESS" and
                         partner_session_id and
                         partner_session_id in sessions)
