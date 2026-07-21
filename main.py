@@ -896,10 +896,11 @@ def initialize_gemini_models_and_module():
     )
 
     # Model names
-    primary_model_name = 'gemini-3.5-flash'
+    primary_model_name = 'gemini-3.6-flash'
+    
     #primary_model_name = 'gemini-3-flash-preview'
 
-    fallback_model_name = 'gemini-3-flash-preview'
+    fallback_model_name = 'gemini-3.5-flash'
 
     # Safety settings — disable all content filtering for Turing test conversations
     safety_settings = [
