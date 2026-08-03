@@ -1995,8 +1995,15 @@ def requeue_or_timeout_session(session_record, db_session: Session, reason: str 
 
     Returns: "requeued" or "timed_out"
     """
-    if not session_record or not session_record.waiting_room_entered_at:
-        return "timed_out"  # Can't calculate wait time, just timeout
+    if not session_record:
+        return "timed_out"
+    if not session_record.waiting_room_entered_at:
+        # FIX (03Aug26, cleanup churn): previously returned WITHOUT writing anything,
+        # so the sweep re-found the same rows every cycle forever. Mark them terminal.
+        session_record.match_status = "timed_out"
+        session_record.timeout_screen = session_record.timeout_screen or f"requeue_timeout_{reason}"
+        session_record.last_updated = datetime.utcnow()
+        return "timed_out"
 
     # Calculate total time since they first entered waiting room
     total_wait_seconds = (datetime.utcnow() - session_record.waiting_room_entered_at).total_seconds()
