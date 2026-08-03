@@ -2090,21 +2090,30 @@ def attempt_match(db_session: Session) -> Optional[Dict[str, str]]:
     # CRITICAL: Acquire lock to prevent race conditions
     # Only one matching operation can happen at a time
     with matching_lock:
-        # Query oldest waiting interrogator (FIFO - first in, first matched)
-        # DEFENSIVE: Also exclude abandoned sessions to prevent ghost matches
-        interrogator = db_session.query(db.StudySession).filter(
-            db.StudySession.role == "interrogator",
-            db.StudySession.match_status == "waiting",
-            db.StudySession.session_status != "abandoned"  # Exclude ghost sessions
-        ).order_by(db.StudySession.waiting_room_entered_at.asc()).first()
+        # FIX 03Aug26 — ghost-match hardening. Both services share ONE database, so
+        # without these filters the human-witness matcher would pair its live
+        # participants with (a) AI-condition sessions (no study_mode filter),
+        # (b) stale 'waiting' rows left by crashes/timeouts (only 'abandoned' was
+        # excluded), or (c) rows whose server-side session no longer exists in
+        # this process's memory. Any of those strands a real participant.
+        def _oldest_live_waiting(role):
+            cutoff = datetime.utcnow() - timedelta(minutes=5)
+            candidates = db_session.query(db.StudySession).filter(
+                db.StudySession.role == role,
+                db.StudySession.match_status == "waiting",
+                db.StudySession.study_mode == STUDY_MODE,             # never cross conditions
+                db.StudySession.session_status == "active",           # only live sessions
+                db.StudySession.waiting_room_entered_at.isnot(None),  # actually entered the room
+                db.StudySession.waiting_room_entered_at > cutoff      # no stale ghosts
+            ).order_by(db.StudySession.waiting_room_entered_at.asc()).limit(10).all()
+            for c in candidates:
+                if c.id in sessions:   # liveness: this process can actually route their messages
+                    return c
+                print(f"👻 SKIPPING GHOST: {c.id[:8]}... waiting in DB but not in memory")
+            return None
 
-        # Query oldest waiting witness
-        # DEFENSIVE: Also exclude abandoned sessions to prevent ghost matches
-        witness = db_session.query(db.StudySession).filter(
-            db.StudySession.role == "witness",
-            db.StudySession.match_status == "waiting",
-            db.StudySession.session_status != "abandoned"  # Exclude ghost sessions
-        ).order_by(db.StudySession.waiting_room_entered_at.asc()).first()
+        interrogator = _oldest_live_waiting("interrogator")
+        witness = _oldest_live_waiting("witness")
 
         if not interrogator or not witness:
             return None  # No match possible yet
