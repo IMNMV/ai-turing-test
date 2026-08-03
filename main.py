@@ -184,6 +184,23 @@ app.add_middleware(
     allow_methods=["*"], # Allows all methods (GET, POST, etc.)
     allow_headers=["*"], # Allows all headers
 )
+
+# FIX D1b (03Aug26): navigator.sendBeacon payloads are sent as text/plain so the
+# browser never needs a CORS preflight during page unload (preflights can die with
+# the page; plain beacons cannot). Pydantic body parsing requires application/json,
+# so translate the content type for the beacon-capable endpoints only.
+_BEACON_JSON_PATHS = ("/submit_rating", "/submit_witness_final_choice",
+                      "/submit_interrogator_final_choice", "/report_abandonment")
+
+@app.middleware("http")
+async def _beacon_content_type_fix(request, call_next):
+    if (request.url.path in _BEACON_JSON_PATHS
+            and request.headers.get("content-type", "").startswith("text/plain")):
+        request.scope["headers"] = [
+            (k, v) if k != b"content-type" else (b"content-type", b"application/json")
+            for (k, v) in request.scope["headers"]
+        ]
+    return await call_next(request)
 # Note: Frontend is hosted separately (GitHub Pages). If you need to
 # serve a local UI, mount static files and templates explicitly.
 # app.mount("/static", StaticFiles(directory="interaction-study-main-2/static"), name="static")
