@@ -2102,7 +2102,11 @@ def attempt_match(db_session: Session) -> Optional[Dict[str, str]]:
                 db.StudySession.role == role,
                 db.StudySession.match_status == "waiting",
                 db.StudySession.study_mode == STUDY_MODE,             # never cross conditions
-                db.StudySession.session_status == "active",           # only live sessions
+                # Waiting-room sessions are still 'pre_consent' in human mode (they only
+                # become 'active' at chat init, AFTER matching) — so exclude terminal
+                # states rather than allowlisting 'active'.
+                db.StudySession.session_status.notin_(
+                    ["abandoned", "timeout", "interrupted", "completed"]),
                 db.StudySession.waiting_room_entered_at.isnot(None),  # actually entered the room
                 db.StudySession.waiting_room_entered_at > cutoff      # no stale ghosts
             ).order_by(db.StudySession.waiting_room_entered_at.asc()).limit(10).all()
