@@ -203,7 +203,22 @@ def get_db():
         database.close()
 
 # --- NEW: Helper Functions for Incremental Database Saves ---
-def create_initial_session_record(session_data, db_session: Session):
+def create_initial_session_record(session_data, db_session: Session, max_attempts: int = 3):
+    """FIX F4 (01Aug26): retry wrapper. A single transient DB failure here used to
+    silently orphan the ENTIRE session — every later save no-ops when the row is
+    missing, with zero log output. Now: retry the create, scream if all fail
+    (the save functions also recreate-on-missing as a second line of defense)."""
+    for attempt in range(1, max_attempts + 1):
+        if _create_initial_session_record_once(session_data, db_session):
+            return True
+        print(f"Retrying initial session record create (attempt {attempt}/{max_attempts} failed) | "
+              f"session {session_data.get('session_id', '?')[:8]}...")
+    print(f"🚨🔴❌ SESSION ROW CREATE FAILED after {max_attempts} attempts | "
+          f"session {session_data.get('session_id', '?')[:8]}... | "
+          f"subsequent saves will attempt recreate-on-missing")
+    return False
+
+def _create_initial_session_record_once(session_data, db_session: Session):
     """Create initial database record when session is initialized"""
     try:
         ui_events = session_data.get("ui_event_log", [])
@@ -240,6 +255,12 @@ def update_session_after_message(session_data, db_session: Session):
     """Update database record after each conversation turn"""
     try:
         session_record = db_session.query(db.StudySession).filter(db.StudySession.id == session_data["session_id"]).first()
+        if not session_record:
+            # FIX F4 (01Aug26): loud + self-heal — if the initial create failed, the row
+            # is missing and every save used to silently no-op. Recreate it now.
+            print(f"🚨 SESSION ROW MISSING at turn save | session {session_data.get('session_id', '?')[:8]}... | attempting recreate")
+            if create_initial_session_record(session_data, db_session):
+                session_record = db_session.query(db.StudySession).filter(db.StudySession.id == session_data["session_id"]).first()
         if session_record:
             # Robustness: any saved turn means the conversation phase was reached, even if
             # /log_conversation_start never landed. This keeps not-collected tracking alive.
@@ -271,6 +292,11 @@ def update_session_after_rating(session_data, db_session: Session, is_final=Fals
     """Update database record after each rating submission"""
     try:
         session_record = db_session.query(db.StudySession).filter(db.StudySession.id == session_data["session_id"]).first()
+        if not session_record:
+            # FIX F4 (01Aug26): same self-heal as update_session_after_message
+            print(f"🚨 SESSION ROW MISSING at rating save | session {session_data.get('session_id', '?')[:8]}... | attempting recreate")
+            if create_initial_session_record(session_data, db_session):
+                session_record = db_session.query(db.StudySession).filter(db.StudySession.id == session_data["session_id"]).first()
         if session_record:
             # Always update confidence ratings and timing data
             session_record.ddm_confidence_ratings = json.dumps(session_data["intermediate_ddm_confidence_ratings"])
@@ -1029,6 +1055,11 @@ def set_witness_final_response(session_record, partner_belief, choice_time_ms=No
     session_record.witness_final_response_collected = True
     session_record.witness_final_response_reason = reason
     session_record.witness_final_response_not_collected_reason = None
+    # FIX F3 (01Aug26): a witness whose final belief is saved has completed their part.
+    # Previously witnesses stayed "active" forever, so restart sweeps marked them
+    # interrupted AND decremented the witness role counter (skewing 50/50 balancing),
+    # and the integrity banner always showed red for finished witnesses.
+    session_record.session_status = "completed"
 
 
 def mark_final_response_not_collected(session_record, reason):
@@ -1894,6 +1925,11 @@ class RatingRequest(BaseModel):
     reading_scroll_count: Optional[int] = None
     reading_keypress_count: Optional[int] = None
     mouse_trajectory: Optional[List[Any]] = None  # [[x,y,ms],...] sampled ~20Hz over the assessment phase
+    # 01Aug26: per-turn tab-visibility summary (per-instance durations enable the
+    # prereg's ">3s single instance" exclusion without relying on the ui-event stream)
+    tab_hidden_instances_ms: Optional[List[float]] = None
+    max_tab_hidden_instance_ms: Optional[float] = None
+    cumulative_tab_hidden_ms: Optional[float] = None
     is_final_response: Optional[bool] = False
     final_response_reason: Optional[str] = None
 
@@ -3999,6 +4035,12 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
         print(f"Warning: decision_time_seconds was None for DDM rating. Session {session_id}, Turn {session['turn_count']}. Using placeholder.")
         actual_decision_time = -1.0
 
+    # 01Aug26: idempotent per turn — a frontend retry or double-click re-send REPLACES
+    # this turn's entry instead of appending a duplicate row
+    session["intermediate_ddm_confidence_ratings"] = [
+        r for r in session["intermediate_ddm_confidence_ratings"]
+        if r.get("turn") != session["turn_count"]
+    ]
     session["intermediate_ddm_confidence_ratings"].append({
         "turn": session["turn_count"],
         "binary_choice": data.binary_choice,  # 'human' or 'ai'
@@ -4015,7 +4057,11 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
         "reading_mouse_move_count": data.reading_mouse_move_count,
         "reading_scroll_count": data.reading_scroll_count,
         "reading_keypress_count": data.reading_keypress_count,
-        "mouse_trajectory": data.mouse_trajectory
+        "mouse_trajectory": data.mouse_trajectory,
+        # 01Aug26: tab-visibility summary for this turn's judgment window
+        "tab_hidden_instances_ms": data.tab_hidden_instances_ms,
+        "max_tab_hidden_instance_ms": data.max_tab_hidden_instance_ms,
+        "cumulative_tab_hidden_ms": data.cumulative_tab_hidden_ms
     })
 
     # Legacy compatibility: the old DDM-era code captured the first slider endpoint.
@@ -4514,7 +4560,14 @@ async def finalize_no_session(data: FinalizeNoSessionRequest, db_session: Sessio
 
 
 @app.get("/get_researcher_data/{session_id}")
-async def get_researcher_data(session_id: str):
+async def get_researcher_data(session_id: str, token: Optional[str] = None):
+    # FIX F6 (01Aug26): this dump includes conversation text and the Prolific ID, so it
+    # now REQUIRES the admin token (same mechanism as /final_response_integrity_check)
+    # and fails closed if ADMIN_CHECK_TOKEN is not configured. Only caller was the
+    # hidden researcher debug panel; no participant-facing flow touches this endpoint.
+    admin_token = os.getenv("ADMIN_CHECK_TOKEN")
+    if not admin_token or token != admin_token:
+        raise HTTPException(status_code=403, detail="Forbidden.")
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found.")
 
