@@ -92,6 +92,21 @@ SOCIAL_STYLE_ASSIGNMENT = "counterbalanced"  # "counterbalanced" for production,
 # Enable/disable specific styles (add or remove from this list)
 ENABLED_SOCIAL_STYLES = ["TURING", "BLAND"]
 
+# FIX (04Aug26): what a HUMAN witness sees on screen. It must NEVER be the AI's
+# engineered `description` (which contains anti-detection mechanics, "ignore other
+# instructions", and internal crisis-handling notes never meant for a participant).
+# The AI still receives the full `description`; only the human's on-screen text uses
+# these. Any style without an entry falls back to a safe generic line.
+WITNESS_INSTRUCTIONS = {
+    "BLAND": "For this conversation, keep your style low-key and plain. Answer naturally and keep your messages short (about 1-7 words).",
+    "TURING": "For this conversation, just chat casually and naturally, the way you'd text someone you'd just met. Be yourself.",
+}
+WITNESS_INSTRUCTION_FALLBACK = "For this conversation, just chat naturally, as yourself."
+
+def get_witness_instruction(style):
+    """Human-facing witness instruction — never the AI's full engineered prompt."""
+    return WITNESS_INSTRUCTIONS.get(style) or WITNESS_INSTRUCTION_FALLBACK
+
 # Social style definitions
 SOCIAL_STYLES = {
     "WARM": {
@@ -2454,7 +2469,7 @@ def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session = Depen
         if existing_session.role == "witness" and existing_session.social_style:
             style_info = SOCIAL_STYLES.get(existing_session.social_style, {})
             response_data["social_style"] = existing_session.social_style
-            response_data["social_style_description"] = style_info.get("description", "")
+            response_data["social_style_description"] = get_witness_instruction(existing_session.social_style)  # 04Aug26: human-facing, not the AI prompt
 
         return response_data
 
@@ -2507,7 +2522,7 @@ def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session = Depen
                 assigned_social_style = random.choice(ENABLED_SOCIAL_STYLES)
 
             style_info = SOCIAL_STYLES.get(assigned_social_style, {})
-            social_style_description = style_info.get("description", "")
+            social_style_description = get_witness_instruction(assigned_social_style)  # 04Aug26: human-facing, not the AI prompt
 
         # Commit the counter update
         db_session.commit()
@@ -2965,7 +2980,7 @@ def join_waiting_room(data: JoinWaitingRoomRequest, db_session: Session = Depend
     if assigned_social_style:
         style_info = SOCIAL_STYLES.get(assigned_social_style, {})
         response_data["social_style"] = assigned_social_style
-        response_data["social_style_description"] = style_info.get("description", "")
+        response_data["social_style_description"] = get_witness_instruction(assigned_social_style)  # 04Aug26: human-facing, not the AI prompt
 
     return JSONResponse(content=response_data)
 
