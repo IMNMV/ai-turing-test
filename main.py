@@ -1072,6 +1072,8 @@ def set_witness_final_response(session_record, partner_belief, choice_time_ms=No
     session_record.witness_final_response_collected = True
     session_record.witness_final_response_reason = reason
     session_record.witness_final_response_not_collected_reason = None
+    # 03Aug26: witnesses were the one path that never recorded total study time
+    calculate_and_save_study_time(session_record)
     # FIX F3 (01Aug26): a witness whose final belief is saved has completed their part.
     # Previously witnesses stayed "active" forever, so restart sweeps marked them
     # interrupted AND decremented the witness role counter (skewing 50/50 balancing),
