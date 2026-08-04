@@ -98,7 +98,7 @@ ENABLED_SOCIAL_STYLES = ["TURING", "BLAND"]
 # The AI still receives the full `description`; only the human's on-screen text uses
 # these. Any style without an entry falls back to a safe generic line.
 WITNESS_INSTRUCTIONS = {
-    "BLAND": "For this conversation, keep your style low-key and plain. Answer naturally and keep your messages short (about 1-7 words).",
+    "BLAND": "For this conversation, keep your style low-key and plain. Answer naturally and keep your messages short.",
     "TURING": "For this conversation, just chat casually and naturally, the way you'd text someone you'd just met. Be yourself.",
 }
 WITNESS_INSTRUCTION_FALLBACK = "For this conversation, just chat naturally, as yourself."
