@@ -108,6 +108,10 @@ WITNESS_INSTRUCTIONS = {
     "TURING": "For this conversation, just chat casually and naturally, the way you'd text someone you'd just met. Be yourself.",
 }
 WITNESS_INSTRUCTION_FALLBACK = "For this conversation, just chat naturally, as yourself."
+# Version stamp for the human-facing witness instruction wording above. Written to the witness
+# session (and copied to its interrogator) so a session's exact wording is always recoverable,
+# even if this text is edited later. Bump this whenever the WITNESS_INSTRUCTIONS text changes.
+WITNESS_INSTRUCTIONS_VERSION = "bland_turing_2026-08-04"
 
 def get_witness_instruction(style):
     """Human-facing witness instruction — never the AI's full engineered prompt."""
@@ -1355,6 +1359,11 @@ def decrement_role_counter(session_record, db_session: Session):
         return
     if not session_record or not session_record.role:
         return
+    # Belt-and-suspenders (05Aug26): only HUMAN_WITNESS sessions ever incremented the counter, so
+    # only they may decrement it. Record-scoped guard protects against any caller that hands us a
+    # cross-condition row (the process-scoped guard above is not enough on a shared database).
+    if getattr(session_record, 'study_mode', None) != "HUMAN_WITNESS":
+        return
     if getattr(session_record, 'counter_decremented', False):
         return  # Already decremented for this session
 
@@ -1387,9 +1396,14 @@ def mark_interrupted_sessions_on_startup():
     try:
         db_session = db.SessionLocal()
         try:
-            # Find all active sessions and mark them as interrupted
+            # Find all active sessions and mark them as interrupted.
+            # FIX (05Aug26): filter by STUDY_MODE so a restart of ONE condition's process never
+            # sweeps the OTHER condition's live sessions. Without this, a HUMAN_WITNESS restart
+            # decremented the shared counter for AI sessions (re-opening the T1.3 drain), and an
+            # AI_WITNESS restart flipped live human sessions to 'interrupted'. Mirrors the T1.2 fix.
             active_sessions = db_session.query(db.StudySession).filter(
-                db.StudySession.session_status == "active"
+                db.StudySession.session_status == "active",
+                db.StudySession.study_mode == STUDY_MODE
             ).all()
 
             for session in active_sessions:
@@ -2214,6 +2228,7 @@ def attempt_match(db_session: Session) -> Optional[Dict[str, str]]:
         interrogator.matched_at = datetime.utcnow()
         interrogator.proceed_to_chat_at = proceed_to_chat_at
         interrogator.social_style = witness.social_style  # Copy witness style for analysis
+        interrogator.witness_instructions_version = witness.witness_instructions_version  # Copy for analysis
 
         witness.matched_session_id = interrogator.id
         witness.match_status = "matched"
@@ -2587,6 +2602,7 @@ def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session = Depen
                 existing_session.start_time = datetime.utcnow()
                 existing_session.role = assigned_role
                 existing_session.social_style = assigned_social_style
+                existing_session.witness_instructions_version = WITNESS_INSTRUCTIONS_VERSION if assigned_social_style else None
                 existing_session.chosen_persona = "pending"
                 existing_session.domain = "pending"
                 existing_session.condition = "pending"
@@ -2663,6 +2679,7 @@ def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session = Depen
                     start_time=datetime.utcnow(),
                     role=assigned_role,
                     social_style=assigned_social_style,
+                    witness_instructions_version=(WITNESS_INSTRUCTIONS_VERSION if assigned_social_style else None),
                     chosen_persona="pending",
                     domain="pending",
                     condition="pending",
@@ -3119,7 +3136,9 @@ async def study_status_ping(db_session: Session = Depends(get_db)):
         # Only count sessions that are actually active (not completed/abandoned)
         active_sessions = db_session.query(db.StudySession).filter(
             db.StudySession.session_status.in_(["active", "pre_consent"]),
-            db.StudySession.role.isnot(None)
+            db.StudySession.role.isnot(None),
+            db.StudySession.study_mode == STUDY_MODE  # FIX (05Aug26): report THIS condition only, so the
+            # balance dashboard is not polluted by the other simultaneously-running study's traffic.
         ).all()
 
         # Categorize by role and match_status
@@ -4549,7 +4568,8 @@ async def final_response_integrity_check(token: Optional[str] = None, db_session
     a collected final response or an explicit not-collected reason.
     """
     conversation_sessions = db_session.query(db.StudySession).filter(
-        db.StudySession.conversation_phase_reached == True
+        db.StudySession.conversation_phase_reached == True,
+        db.StudySession.study_mode == STUDY_MODE  # FIX (05Aug26): preflight THIS condition only
     ).all()
 
     missing_interrogator = []
