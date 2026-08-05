@@ -47,6 +47,12 @@ RESPONSE_DELAY_PER_PREV_CHAR_MEAN = 0.03 # Paper: per char of PREVIOUS message (
 RESPONSE_DELAY_PER_PREV_CHAR_STD = 0.003 # Paper std for per-prev-char
 RESPONSE_DELAY_THINKING_SHAPE = 2.5      # Paper: Gamma shape k (thinking time)
 RESPONSE_DELAY_THINKING_SCALE = 0.25     # Paper: Gamma scale theta
+# FIX (04Aug26, T2.1): hard caps. A message had no length limit and the AI "typing" delay is
+# computed per-character with no ceiling, so a large paste forced a multi-minute asyncio.sleep
+# (proven: a 3000-char message held the server 107s; 10k chars ~= 5 min). 2000 chars is far
+# above any real chat turn; 30s matches the human typing-delay ceiling this study already used.
+MAX_MESSAGE_CHARS = 2000
+MAX_AI_SLEEP_SECONDS = 30.0
 
 # --- HUMAN MODE MESSAGE DELAY CONFIGURATION ---
 # Based on observed human typing delays from empirical data
@@ -1341,6 +1347,12 @@ def decrement_role_counter(session_record, db_session: Session):
     Called from: /report_abandonment, /finalize_no_session,
     cleanup_orphaned_sessions, mark_interrupted_sessions_on_startup
     """
+    # FIX (04Aug26, T1.3): the role counter balances the HUMAN-HUMAN condition only. AI-condition
+    # sessions carry role="interrogator" but NEVER increment the counter (AI mode early-returns
+    # before the counter logic), so letting them DECREMENT it drained the shared counter one-way
+    # and chronically starved the human study of witnesses. Proven live (5->4 on one AI abandon).
+    if STUDY_MODE != "HUMAN_WITNESS":
+        return
     if not session_record or not session_record.role:
         return
     if getattr(session_record, 'counter_decremented', False):
@@ -2262,8 +2274,10 @@ def cleanup_orphaned_sessions(db_session: Session):
         # This saves participants whose partner dropped during waiting room
         # Skip sessions already marked as abandoned (report_abandonment already handled them)
         stale_matches = db_session.query(db.StudySession).filter(
+            db.StudySession.study_mode == STUDY_MODE,              # FIX 04Aug26 (T1.2): never touch the other condition's sessions
             db.StudySession.match_status == "matched",
             db.StudySession.session_status != "abandoned",
+            db.StudySession.conversation_phase_reached != True,    # FIX 04Aug26 (T1.1): never re-queue a pair that has started talking
             db.StudySession.matched_at < datetime.utcnow() - timedelta(minutes=2)
         ).all()
 
@@ -2303,6 +2317,7 @@ def cleanup_orphaned_sessions(db_session: Session):
         # last_updated for the staleness check on those.
         _stale_cutoff = datetime.utcnow() - timedelta(minutes=2)
         stale_waiting = db_session.query(db.StudySession).filter(
+            db.StudySession.study_mode == STUDY_MODE,              # FIX 04Aug26 (T1.2)
             db.StudySession.match_status == "waiting",
             db.StudySession.session_status != "abandoned",
             or_(
@@ -2324,6 +2339,7 @@ def cleanup_orphaned_sessions(db_session: Session):
         # 3. Clean up assigned sessions that never clicked "Enter Waiting Room" (>2 minutes)
         # Use last_updated since waiting_room_entered_at isn't set yet for assigned sessions
         stale_assigned = db_session.query(db.StudySession).filter(
+            db.StudySession.study_mode == STUDY_MODE,              # FIX 04Aug26 (T1.2)
             db.StudySession.match_status == "assigned",
             db.StudySession.session_status != "abandoned",
             db.StudySession.last_updated < datetime.utcnow() - timedelta(minutes=2)
@@ -2341,6 +2357,7 @@ def cleanup_orphaned_sessions(db_session: Session):
         # Browser was closed before beforeunload was attached, so no beacon fired
         # Timeout matches consent screen (3 minutes)
         stale_pre_consent = db_session.query(db.StudySession).filter(
+            db.StudySession.study_mode == STUDY_MODE,              # FIX 04Aug26 (T1.2)
             db.StudySession.session_status == "pre_consent",
             db.StudySession.last_updated < datetime.utcnow() - timedelta(minutes=3)
         ).all()
@@ -3287,9 +3304,31 @@ def check_partner_message(session_id: str, db_session: Session = Depends(get_db)
                 print(f"⚠️ MESSAGE GAP: Session {session_id[:8]}... - Partner turn {partner_turn}, my turn {my_turn}")
                 # Still continue - frontend will handle it
 
-            # Add partner's message to my conversation log (deep copy to prevent shared mutation)
-            session['conversation_log'].append(copy.deepcopy(latest_message))
+            # FIX (04Aug26, T1.4): idempotency guard. If a concurrent poll already delivered
+            # this turn, do not append / advance / re-deliver it again (was causing duplicate
+            # messages and a duplicate turn_count advance). Claim the turn BEFORE appending so
+            # the double-append window is as small as possible on a single worker.
+            if session.get('turn_count', 0) >= partner_turn:
+                return JSONResponse(content={"new_message": False, "partner_dropped": False, "study_completed": False})
             session['turn_count'] = partner_turn
+            session['conversation_log'].append(copy.deepcopy(latest_message))
+
+            # FIX (04Aug26, T1.1 root cause): PERSIST the received message to THIS participant's
+            # own DB row. Previously a received message was appended to memory only and never
+            # written here, so a witness who had only RECEIVED (not yet replied) had an EMPTY
+            # saved transcript — which made the stale-match cleanup sweep re-queue a LIVE pair
+            # (proven), and lost the message on a server restart. Marking the conversation phase
+            # also lets the cleanup sweep tell a talking pair from one that never started.
+            try:
+                _rec = db_session.query(db.StudySession).filter(db.StudySession.id == session_id).first()
+                if _rec:
+                    _rec.conversation_log = json.dumps(session['conversation_log'])
+                    mark_conversation_phase_reached(_rec)
+                    _rec.last_updated = datetime.utcnow()
+                    db_session.commit()
+            except Exception as _e:
+                db_session.rollback()
+                print(f"⚠️ received-message persist failed for {session_id[:8]}...: {_e}")
 
             print(f"✉️ MESSAGE DELIVERED: {partner_id[:8]}... -> {session_id[:8]}... (Turn {partner_turn})")
 
@@ -3573,7 +3612,8 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
     session_id = data.session_id
     # No HTML escaping — frontend uses textContent (not innerHTML) which is XSS-safe.
     # html.escape was causing apostrophes to display as &#x27; in partner's chat.
-    user_message = str(data.message)
+    # FIX (04Aug26, T2.1): clamp length so an oversized paste can't drive a runaway delay/sleep.
+    user_message = str(data.message)[:MAX_MESSAGE_CHARS]
 
     # NEW: Try to recover session from database if not in memory
     if session_id not in sessions:
@@ -3834,7 +3874,8 @@ async def send_message(data: ChatRequest, db_session: Session = Depends(get_db))
 
 
     # Calculate how much *additional* sleep is needed
-    sleep_duration_needed = max(0, target_visible_response_time_paper_model - time_spent_on_actual_ai_calls)
+    # FIX (04Aug26, T2.1): cap the sleep so it can never hold the server for minutes.
+    sleep_duration_needed = min(max(0, target_visible_response_time_paper_model - time_spent_on_actual_ai_calls), MAX_AI_SLEEP_SECONDS)
     
     print(f"--- DEBUG: Time spent on actual AI calls: {time_spent_on_actual_ai_calls:.3f}s ---")
     print(f"--- DEBUG: Sleep duration needed (Paper Model): {sleep_duration_needed:.3f}s ---")
@@ -4207,10 +4248,17 @@ async def submit_rating(data: RatingRequest, db_session: Session = Depends(get_d
         session["final_response_reason"] = final_response_reason
         
         # NEW: Final save with completion status
-        update_session_after_rating(session, db_session, is_final=True)
+        # FIX (04Aug26, T2.2): check the save result. Previously the return was ignored and the
+        # in-memory session was deleted unconditionally, so a transient DB failure on the FINAL
+        # save silently lost the completion flag + final confidence with NO copy left to recover
+        # from. Now: only evict after a CONFIRMED save; on failure keep the session and return an
+        # error so the client's existing retry + sendBeacon path re-persists it.
+        final_saved = update_session_after_rating(session, db_session, is_final=True)
+        if not final_saved:
+            print(f"🛑 FINAL SAVE FAILED for {session_id[:8]}... — session retained for client retry")
+            raise HTTPException(status_code=503, detail="Final rating save failed; please retry.")
         print(f"Session {session_id} completed and saved to database.")
-        
-        # Clean up the in-memory session
+        # Clean up the in-memory session (only after a confirmed save)
         del sessions[session_id]
         study_over = True
 
