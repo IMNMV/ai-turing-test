@@ -2454,6 +2454,19 @@ def get_or_assign_role(data: GetOrAssignRoleRequest, db_session: Session = Depen
 
     print(f"🎭 Role assignment request for participant_id={participant_id}, prolific_pid={prolific_pid}, mode={STUDY_MODE}")
 
+    # RELOAD GUARD (04Aug26): if this participant already reached the conversation phase in a
+    # prior load, do NOT let them restart or re-queue — that would strand their partner and
+    # (via STEP 2 below) reuse+wipe their row. Route them to Prolific instead. Their partner is
+    # separately routed to finish the study by the /report_abandonment beacon. Applies to both
+    # conditions (initialize_study keys the session row by participant_id in both).
+    _prior = db_session.query(db.StudySession).filter(db.StudySession.id == participant_id).first()
+    if _prior is not None and getattr(_prior, "conversation_phase_reached", False):
+        print(f"🔁 RELOAD BLOCKED: {participant_id[:8]}... already in conversation phase; routing to Prolific (no re-queue, data preserved)")
+        return {
+            "already_in_study": True,
+            "study_mode": STUDY_MODE
+        }
+
     # AI_WITNESS MODE: Everyone is interrogator (talking to AI)
     if STUDY_MODE == "AI_WITNESS":
         print(f"✅ AI_WITNESS mode: Assigning interrogator role (no counter)")
