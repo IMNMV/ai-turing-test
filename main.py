@@ -3585,6 +3585,15 @@ async def report_partner_dropped(request: Request, db_session: Session = Depends
             ).first()
             if partner_record:
                 mark_final_response_not_collected(partner_record, "partner_reported_dropout_midconvo")
+                # FIX (06Aug26): notify the SURVIVING partner immediately. The reporter always exits
+                # after reporting, so the pair is dead either way — but previously only the reporter
+                # was flagged, so the survivor's 5s poll asked "partner_dropped?" for 2+ minutes and
+                # was told no, wasting paid time (measured 2m20s in testing) and inflating the study's
+                # median completion time on Prolific. Flagging them is non-destructive: their poll
+                # routes them to their final question with all data intact and normal pay.
+                partner_record.match_status = 'partner_dropped'
+                if partner_id in sessions:
+                    sessions[partner_id]['match_status'] = 'partner_dropped'
 
         db_session.commit()
 
