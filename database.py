@@ -14,9 +14,9 @@ if DATABASE_URL and DATABASE_URL.startswith("postgresql://"):
     # Production: PostgreSQL with optimized pooling
     engine = create_engine(
         DATABASE_URL,
-        pool_size=10,              # Number of connections to keep open
-        max_overflow=20,           # Additional connections when pool is exhausted
-        pool_timeout=30,           # Seconds to wait before timing out getting a connection
+        pool_size=25,              # 07Aug26: raised 10->25 — evening launch load exhausted the pool
+        max_overflow=35,           # 07Aug26: raised 20->35 (60 max; PG default cap is ~100 shared with the AI service)
+        pool_timeout=10,           # 07Aug26: fail fast (30s waits stacked up hung requests during exhaustion)
         pool_recycle=3600,         # Recycle connections after 1 hour
         pool_pre_ping=True,        # Test connections before using them
         connect_args={
